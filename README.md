@@ -5,4 +5,4 @@ A collection of tools and utilities for Edge Talk.
 ## Available Tools
 
 ### Flight Search
-- [Flight Search Tool](flight-search/README.md) - Real-time flight information search between airports using Aviation Stack API
+- [Flight Search Tool](find-flights/README.md) - Real-time flight information search between airports using Aviation Stack API
