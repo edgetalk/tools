@@ -1,0 +1,34 @@
+@wire(shell-cmd-inner {
+  {
+    env:shell-server-url | If(IsNone {"http://localhost:6666"} {ExpectString}) >= shell-server-url
+    "/cmd" | AppendTo(shell-server-url)
+  }
+  ToJson | Http.Post(shell-server-url Timeout: 30)
+})
+
+@wire(shell-cmd {
+  Do(shell-cmd-inner)
+})
+
+{
+  definition: {
+    name: "shell_cmd"
+    description: """* Execute a shell command through a persistent shell server. 
+* All commands are executed in the same shell session, maintaining state, environment variables, and working directory between calls.
+* Please avoid commands that may produce a very large amount of output.
+* Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.
+"""
+    parameters: {
+      type: "object"
+      properties: {
+        cmd: {
+          type: "string"
+          description: "The shell command to execute in the persistent shell session. Note, if the command requires user input (such as sudo requesting a password) IT WILL NOT WORK. Ask users to enter the command manually instead."
+        }
+      }
+      required: ["cmd"]
+    }
+  }
+  
+  use: shell-cmd
+}

@@ -1,0 +1,102 @@
+@define(headers {
+  "Content-Type": "application/json"
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  "Accept-Language": "en-US,en;q=0.9"
+})
+
+@wire(youtube-captions {
+  {Take("video_id") | ExpectString = video-id}
+  {Take("language_code") | ExpectString = language-code}
+  
+  "# " >= output
+  
+  {
+    "context": {
+      "client": {
+        "hl": "en"
+        "clientName": "WEB"
+        "clientVersion": "2.20240101.00.00"
+        "clientFormFactor": "UNKNOWN_FORM_FACTOR"
+        "clientScreen": "WATCH"
+      }
+      "user": {
+        "lockedSafetyMode": false
+      }
+      "request": {
+        "useSsl": true
+        "internalExperimentFlags": []
+        "consistencyTokenJars": []
+      }
+    }
+    "videoId": video-id
+    "playbackContext": {
+      "contentPlaybackContext": {
+        "vis": 0
+        "splay": false
+        "autoCaptionsDefaultOn": false
+        "autonavState": "STATE_NONE"
+        "html5Preference": "HTML5_PREF_WANTS"
+        "lactMilliseconds": "-1"
+      }
+    }
+    "racyCheckOk": false
+    "contentCheckOk": false
+  } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" Headers: @headers Timeout: 30)
+  FromJson | ExpectTable
+  {Take("videoDetails") | ExpectTable
+    {Take("title") | ExpectString | AppendTo(output)
+      "\n\n" | AppendTo(output)
+    }
+    {"Author: " | AppendTo(output)}
+    {Take("author") | ExpectString | AppendTo(output)
+      "\n\n" | AppendTo(output)
+    }
+    {"Description:\n" | AppendTo(output)}
+    {Take("shortDescription") | ExpectString | AppendTo(output)
+      "\n\n" | AppendTo(output)
+    }
+  }
+  {Take("captions") | ExpectTable
+    Take("playerCaptionsTracklistRenderer") | ExpectTable
+    Take("captionTracks") | ExpectSeq
+    ForEach({
+      ExpectTable
+      {Take("baseUrl") | ExpectString = base-url}
+      Take("languageCode") | ExpectString | When(Is(language-code) {
+        none | Http.Get(base-url Headers: @headers Timeout: 30) | AppendTo(output)
+        Return
+      })
+    })
+  }
+  
+  output
+})
+
+{
+  definition: {
+    name: "youtube_captions"
+    description: "Get captions for a YouTube video in a specific language. Use this tool when the user asks you to check a YouTube video."
+    parameters: {
+      type: "object"
+      properties: {
+        video_id: {
+          type: "string"
+          description: "The ID of the YouTube video to get captions for."
+        }
+        language_code: {
+          type: "string"
+          description: "The language code of the captions to get. For example, 'en' for English or 'es' for Spanish."
+        }
+      }
+      required: ["video_id" "language_code"]
+    }
+  }
+  
+  use: youtube-captions
+}
+
+; ; Test code
+; {
+;   "video_id": "JswxPY1f0lw"
+;   "language_code": "en"
+; } | Do(youtube-captions) | Log("captions")
