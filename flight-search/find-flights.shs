@@ -1,0 +1,62 @@
+@wire(find-flights {
+  ; input will be a table, so we take the columns we need
+  ; in this case, we need the columns we need
+  {Take("from") | ExpectString = from}
+  {Take("to") | ExpectString = to}
+  
+  Time.Epoch | Date.Format("%Y-%m-%d") = date
+  env:aviationstack-api-key | ExpectString = api-key
+  
+  ["https://api.aviationstack.com/v1/flights?access_key=" api-key "&dep_iata=" from "&arr_iata=" to] | String.Join = url
+  none | Http.Get(url Timeout: 30) | Log("flight-info") | Await(FromJson) | ExpectTable = flight-info
+  flight-info:data | ExpectSeq >= flights
+  
+  ; remove flights that are not on today's date
+  Remove(From: flights Predicate: {
+    ExpectTable | Take("flight_date") | ExpectString | IsNot(date)
+  })
+  
+  ; compress the table a bit, remove the columns we don't need
+  flights | Map({
+    ExpectTable
+    {
+      airline: (Take("airline"))
+      flight: (Take("flight"))
+      departure: (Take("departure"))
+      arrival: (Take("arrival"))
+    }
+  }) | ToString
+})
+
+{
+  definition: {
+    name: "find_flights"
+    description: "Find flights between two airports."
+    parameters: {
+      type: "object"
+      properties: {
+        from: {
+          type: "string"
+          description: "The departure airport in IATA format. e.g. KIX, no spaces."
+        }
+        to: {
+          type: "string"
+          description: "The arrival airport in IATA format. e.g. SIN, no spaces."
+        }
+      }
+      required: ["from" "to"]
+    }
+  }
+  
+  use: find-flights
+}
+
+; ; Test code
+; Log = tool
+
+; tool:use | ExpectWire = find-flights-wire
+
+; {
+;   from: "KIX"
+;   to: "SIN"
+; } | WireRunner(find-flights-wire) | Log
