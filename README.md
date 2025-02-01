@@ -19,6 +19,13 @@ A collection of tools and utilities for Edge Talk, providing various integration
 ### Media & Content
 - [YouTube Captions Tool](youtube-captions/README.md) - Retrieve video information and captions from YouTube videos
 
+## Infrastructure
+
+The [infrastructure](infrastructure/README.md) directory contains setup files for running tools in a sandboxed environment:
+- Docker container definition
+- Shell server for persistent sessions
+- Security and isolation features
+
 ## Requirements
 
 Different tools may require specific API keys or authentication:
@@ -27,6 +34,8 @@ Different tools may require specific API keys or authentication:
 - Aviation Stack API key for flight information
 - YouTube API access for video captions
 
+Docker is required for running tools in a sandboxed environment. See the [infrastructure setup guide](infrastructure/README.md) for details.
+
 ## Contributing
 
 Feel free to contribute new tools or improvements to existing ones. Make sure to:
@@ -34,3 +43,4 @@ Feel free to contribute new tools or improvements to existing ones. Make sure to
 2. Include comprehensive documentation
 3. Add tool entry to this README
 4. Test thoroughly before submitting
+5. Use the provided Docker environment for testing
