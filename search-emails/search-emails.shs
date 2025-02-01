@@ -1,0 +1,85 @@
+@wire(search-emails-inner {
+  {Take("query") | ExpectString = query}
+  
+  Google.Auth = google-token
+  
+  {
+    "Authorization": (["Bearer " google-token] | String.Join)
+    "Accept": "application/json"
+  } = headers
+  
+  "" >= emails
+  
+  {
+    maxResults: "15" ; limit to 15 results
+    q: query
+    orderBy: "date" ; order by date
+  } | Log("query") | Http.Get("https://gmail.googleapis.com/gmail/v1/users/me/messages" Headers: headers)
+  FromJson | ExpectTable | Take("messages")
+  When(IsSeq {
+    ExpectSeq
+    ForEach({
+      ExpectTable
+      {Take("id") | ExpectString = message-id}
+      {Take("threadId") | ExpectString = thread-id}
+      "" >= subject
+      "" >= from
+      "" >= date
+      ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = url
+      {format: "metadata"} | Http.Get(url Headers: headers) | Log("email")
+      FromJson | ExpectTable
+      {Take("snippet") | ExpectString = snippet}
+      Take("payload") | ExpectTable
+      Take("headers") | ExpectSeq
+      ForEach({
+        ExpectTable
+        {Take("name") | ExpectString = header-name}
+        {Take("value") | ExpectString = header-value}
+        header-name | When(Is("Subject") {
+          header-value > subject
+        })
+        header-name | When(Is("From") {
+          header-value > from
+        })
+        header-name | When(Is("Date") {
+          header-value > date
+        })
+      })
+      
+      [
+        "ID: " message-id
+        "\nFrom: " from
+        "\nSubject: " subject
+        "\nDate: " date
+        "\nSnippet: " snippet
+        "\n\n"
+      ] | String.Join
+      AppendTo(emails)
+    })
+  })
+  
+  emails
+} Pure: true)
+
+@wire(search-emails {
+  Do(search-emails-inner)
+})
+
+{
+  definition: {
+    name: "search_emails"
+    description: "Search for emails in the user's inbox."
+    parameters: {
+      type: "object"
+      properties: {
+        query: {
+          type: "string"
+          description: "The query in google gmail search syntax to search for. e.g. 'is:unread label:inbox newer_than:2d OR (is:important label:inbox newer_than:2d)'"
+        }
+      }
+      required: ["query"]
+    }
+  }
+  
+  use: search-emails
+}
