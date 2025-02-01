@@ -1,0 +1,253 @@
+@define(base-config {
+  ; Base configuration
+  "https://api.github.com" = github-api-base
+  ["Bearer " github-token] | String.Join = auth-header
+  
+  ; Common headers for GitHub API
+  {
+    "Accept": "application/vnd.github.v3+json"
+    "Authorization": auth-header
+    "User-Agent": "Shards-GitHub-Tool"
+  } = base-headers
+})
+
+@template(github-post [endpoint] {
+  Await(ToJson) = params
+  
+  @base-config
+  
+  [github-api-base "/" endpoint] | String.Join = url
+  
+  params | Http.Post(
+    URL: url
+    Headers: base-headers
+    Timeout: 30
+  )
+})
+
+@template(github-get [endpoint] {
+  = params ; keep as shards table for get
+  
+  @base-config
+  
+  [github-api-base "/" endpoint] | String.Join = url
+  
+  params | Http.Get(
+    URL: url
+    Headers: base-headers
+    Timeout: 30
+  )
+})
+
+@wire(create-pr {
+  ; Input validation and extraction
+  {Take("owner") | ExpectString = owner}
+  {Take("repo") | ExpectString = repo}
+  {Take("title") | ExpectString = title}
+  {Take("head") | ExpectString = head}
+  {Take("base") | ExpectString = base}
+  {Take("body") | ExpectString = pr-body}
+  
+  ; Create the PR
+  ["repos/" owner "/" repo "/pulls"] | String.Join = pr-endpoint
+  
+  {
+    title: title
+    head: head
+    base: base
+    body: pr-body
+  } | @github-post(pr-endpoint)
+})
+
+@wire(list-issues {
+  ; Input validation and extraction
+  {Take("owner") | ExpectString = owner}
+  {Take("repo") | ExpectString = repo}
+  {Take("state") | If(IsNone {"open"} {ExpectString}) = state}
+  
+  ; List issues
+  ["repos/" owner "/" repo "/issues"] | String.Join = issues-endpoint
+  
+  "" >= issues-text
+  
+  {
+    state: state
+  } | @github-get(issues-endpoint) | Await(FromJson)
+  ExpectSeq | ForEach({
+    ; Extract only relevant fields for each issue
+    ExpectTable = issue
+    "Issue Number: " | AppendTo(issues-text)
+    issue:number | ToString | AppendTo(issues-text)
+    "\nTitle: " | AppendTo(issues-text)
+    issue:title | ToString | AppendTo(issues-text)
+    "\nState: " | AppendTo(issues-text)
+    issue:state | ToString | AppendTo(issues-text)
+    "\nCreated At: " | AppendTo(issues-text)
+    issue:created_at | ToString | AppendTo(issues-text)
+    "\nUpdated At: " | AppendTo(issues-text)
+    issue:updated_at | ToString | AppendTo(issues-text)
+    "\nAssignee: " | AppendTo(issues-text)
+    issue:assignee | ToString | AppendTo(issues-text)
+    "\nBody: " | AppendTo(issues-text)
+    issue:body | ToString | AppendTo(issues-text)
+    "\n\n" | AppendTo(issues-text)
+  })
+  
+  issues-text
+})
+
+@wire(create-issue {
+  ; Input validation and extraction
+  {Take("owner") | ExpectString = owner}
+  {Take("repo") | ExpectString = repo}
+  {Take("title") | ExpectString = title}
+  {Take("body") | ExpectString = issue-body}
+  {Take("labels") | If(IsNone {[]} {ExpectSeq}) = labels}
+  
+  ; Create the issue
+  ["repos/" owner "/" repo "/issues"] | String.Join = issue-endpoint
+  
+  {
+    title: title
+    body: issue-body
+    labels: labels
+  } | @github-post(issue-endpoint)
+})
+
+@wire(update-issue {
+  ; Input validation and extraction
+  {Take("owner") | ExpectString = owner}
+  {Take("repo") | ExpectString = repo}
+  {Take("issue_number") | ExpectInt = issue-number}
+  {Take("state") | ExpectString = state}
+  {Take("body") | If(IsNone {""} {ExpectString}) = issue-body}
+  
+  ; Update the issue
+  ["repos/" owner "/" repo "/issues/" issue-number] | String.Format = issue-endpoint
+  
+  {
+    state: state
+    body: issue-body
+  } | @github-post(issue-endpoint)
+})
+
+@wire(get-repo {
+  ; Input validation and extraction
+  {Take("owner") | ExpectString = owner}
+  {Take("repo") | ExpectString = repo}
+  
+  ; Get repo info
+  ["repos/" owner "/" repo] | String.Join = repo-endpoint
+  
+  none | @github-get(repo-endpoint)
+})
+
+@wire(github-tools-inner {
+  {Take("input") | ExpectTable = input}
+  {Take("token") | ExpectString = github-token}
+  
+  input:command | ExpectString
+  Match([
+    "create_pr" {input | Do(create-pr)}
+    "list_issues" {input | Do(list-issues)}
+    "create_issue" {input | Do(create-issue)}
+    "update_issue" {input | Do(update-issue)}
+    "get_repo" {input | Do(get-repo)}
+  ] Passthrough: false)
+} Pure: true)
+
+@wire(github_tools {
+  = github-tools-input
+  env:github-token | ExpectString = github-token
+  {
+    input: github-tools-input
+    token: github-token
+  } | Do(github-tools-inner)
+  Log("github-tools-inner result")
+})
+
+{
+  definition: {
+    name: "github_tools"
+    description: """Tools for interacting with GitHub API:
+- Create and manage pull requests for code review and merging
+- List, create and update repository issues
+- Retrieve repository metadata and information
+    
+Requires `github-token` environment variable to be set with appropriate permissions:
+- repo scope for private repositories
+- public_repo scope for public repositories
+- issues scope for issue management
+- pull_requests scope for PR operations"""
+    parameters: {
+      type: "object"
+      properties: {
+        command: {
+          description: """The GitHub operation to perform:
+- create_pr: Create a new pull request to merge changes from one branch into another
+- list_issues: Get a list of issues for a repository with optional state filter
+- create_issue: Open a new issue in the repository with title, body and optional labels
+- update_issue: Modify an existing issue's state or body content
+- get_repo: Retrieve repository information including description, stars, forks etc."""
+          enum: ["create_pr" "list_issues" "create_issue" "update_issue" "get_repo"]
+          type: "string"
+        }
+        owner: {
+          description: "The GitHub repository owner (organization or username)"
+          type: "string"
+        }
+        repo: {
+          description: "The GitHub repository name without owner (e.g. 'project' not 'owner/project')"
+          type: "string"
+        }
+        title: {
+          description: "Title for PR or issue - should be clear and descriptive of the changes or problem"
+          type: "string"
+        }
+        body: {
+          description: "Detailed description for PR or issue. For PRs, describe the changes made. For issues, describe the problem or feature request. Supports GitHub markdown."
+          type: "string"
+        }
+        head: {
+          description: "Name of the branch containing the changes for the PR (e.g. 'feature-branch' or 'username:feature-branch' for forks)"
+          type: "string"
+        }
+        base: {
+          description: "Name of the target branch where changes should be merged into (e.g. 'main' or 'master')"
+          type: "string"
+        }
+        state: {
+          description: "Filter or set state of issues. For listing: 'open', 'closed', or 'all'. For updating: 'open' or 'closed'."
+          type: "string"
+        }
+        issue_number: {
+          description: "The number of the issue to update. This is the number shown in the issue URL and title (e.g. '#123')"
+          type: "integer"
+        }
+        labels: {
+          description: "List of label names to apply to the issue. Labels must already exist in the repository."
+          type: "array"
+          items: {
+            type: "string"
+          }
+        }
+      }
+      required: ["command" "owner" "repo"]
+    }
+  }
+  
+  use: github_tools
+}
+
+; ; Test code
+; @env("GITHUB_TOKEN") | Set(env "github-token")
+
+; {
+;   owner: "fragcolor-xyz"
+;   repo: "formabble"
+; } | Do(get-repo) | Log
+
+; {
+;   owner: "fragcolor-xyz"
+;   repo: "formabble"
+; } | Do(list-issues) | Log
