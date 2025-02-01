@@ -1,0 +1,39 @@
+@wire(flight-info {
+  ; input will be a table, so we take the columns we need
+  ; in this case, we need the columns we need
+  {Take("flight-number") | ExpectString = flight-number}
+
+  env:aviationstack-api-key | ExpectString = api-key
+  
+  ["https://api.aviationstack.com/v1/flights?access_key=" api-key "&flight_iata=" flight-number] | String.Join = url
+  none | Http.Get(url Timeout: 30) | Log("flight-info") | Await(FromJson) | ExpectTable = flight-info
+  flight-info:data | ExpectSeq | Limit(5) | ToString
+})
+
+{
+  definition: {
+    name: "flight_info"
+    description: "Get flight information for a given flight number."
+    parameters: {
+      type: "object"
+      properties: {
+        flight-number: {
+          type: "string"
+          description: "The flight number to get information for in IATA format. e.g. SQ123, no spaces."
+        }
+      }
+      required: ["flight-number"]
+    }
+  }
+  
+  use: flight-info
+}
+
+; ; Test code
+; Log = tool
+
+; tool:use | ExpectWire = flight-info-wire
+
+; {
+;   flight-number: "SQ623"
+; } | WireRunner(flight-info-wire) | Log
