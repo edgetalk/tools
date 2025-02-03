@@ -21,10 +21,16 @@
 * If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
 * The `undo_edit` command will revert the last edit made to the file at `path`
 
+Choosing between `str_replace` and `insert`:
+* For simple text files with unique content: Use `str_replace` with exact matching
+* For structured files (XML, JSON, PLIST): Use `insert` with line numbers for precise control
+* For complex changes: Use `view` to find line numbers, then `insert` for reliable modifications
+
 Notes for using the `str_replace` command:
-* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!
-* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique
-* The `new_str` parameter should contain the edited lines that should replace the `old_str`
+* Use only for files where the target text appears exactly once
+* The `old_str` must match uniquely - if multiple matches exist, use `insert` instead
+* Best for simple replacements in unstructured text files
+* The `new_str` parameter contains the replacement content
 """
     parameters: {
       type: "object"
@@ -47,7 +53,7 @@ Notes for using the `str_replace` command:
           type: "string"
         }
         old_str: {
-          description: "Required parameter of `str_replace` command containing the string in `path` to replace."
+          description: "Required parameter of `str_replace` command containing the string in `path` to replace. Must match exactly one location in the file."
           type: "string"
         }
         path: {
