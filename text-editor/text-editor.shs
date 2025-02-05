@@ -30,8 +30,7 @@ Notes for using the `str_replace` command:
 * Use only for files where the target text appears exactly once
 * The `old_str` must match uniquely - if multiple matches exist, use `insert` instead
 * Best for simple replacements in unstructured text files
-* The `new_str` parameter contains the replacement content
-"""
+* The `new_str` parameter contains the replacement content"""
     parameters: {
       type: "object"
       properties: {

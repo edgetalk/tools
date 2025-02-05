@@ -16,8 +16,7 @@
     description: """* Execute a shell command through a persistent shell server. 
 * All commands are executed in the same shell session, maintaining state, environment variables, and working directory between calls.
 * Please avoid commands that may produce a very large amount of output.
-* Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.
-"""
+* Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background."""
     parameters: {
       type: "object"
       properties: {

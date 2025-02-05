@@ -1,7 +1,10 @@
+; Notice that we support multiple accounts, in this case we're using the first account.
+; If you want to use a different account, you can change the index and add multiple versions of this tool.
+
 @wire(search-emails-inner {
   {Take("query") | ExpectString = query}
   
-  Google.Auth = google-token
+  1 | Google.Auth = google-token
   
   {
     "Authorization": (["Bearer " google-token] | String.Join)
@@ -67,7 +70,7 @@
 
 {
   definition: {
-    name: "search_emails"
+    name: "search_emails_1"
     description: "Search for emails in the user's inbox."
     parameters: {
       type: "object"
