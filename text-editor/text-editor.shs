@@ -14,23 +14,25 @@
   definition: {
     name: "text_editor"
     
-    description: """Custom editing tool for viewing, creating and editing files
-* State is persistent across command calls and discussions with the user
-* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep
-* The `create` command cannot be used if the specified `path` already exists as a file
-* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
-* The `undo_edit` command will revert the last edit made to the file at `path`
+    description: """File editor with persistent state and smart modification strategies
 
-Choosing between `str_replace` and `insert`:
-* For simple text files with unique content: Use `str_replace` with exact matching
-* For structured files (XML, JSON, PLIST): Use `insert` with line numbers for precise control
-* For complex changes: Use `view` to find line numbers, then `insert` for reliable modifications
+Key features:
+* State persists across all operations and user interactions
+* `view` shows line-numbered file contents or 2-level directory listings
+* `create` fails if path exists; `undo_edit` reverts last change per file
+* Long outputs truncated with `<response clipped>`
 
-Notes for using the `str_replace` command:
-* Use only for files where the target text appears exactly once
-* The `old_str` must match uniquely - if multiple matches exist, use `insert` instead
-* Best for simple replacements in unstructured text files
-* The `new_str` parameter contains the replacement content"""
+Modification strategies:
+1. `str_replace` - For single, exact matches in simple files:
+   - Guarantees unique `old_str` match required
+   - Ideal for unstructured content replacements
+2. `insert` - Line-based edits for structured formats (XML/JSON/PLIST):
+   - Use with `view`-obtained line numbers
+   - Preferred for complex/multi-occurrence changes
+
+Safety notes:
+* Validate matches with `view` before modifying
+* Prefer line numbers for structured data integrity"""
     parameters: {
       type: "object"
       properties: {
