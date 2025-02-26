@@ -1,0 +1,57 @@
+@wire(roll-dice {
+  ; input will be a table with sides and count
+  {Take("sides") | ExpectInt = sides}
+  {Take("count") | ExpectInt = count}
+  
+  ; create sequence of random rolls
+  Sequence(rolls Type: @type([Type::Int]))
+  Repeat({
+    RandomInt(Max: sides) | Add(1) >> rolls
+  } Times: count)
+  
+  ; create result table with rolls and sum
+  {
+    rolls: rolls
+    sum: (rolls | Reduce(Add($0)))
+  } | ToJson
+})
+
+{
+  definition: {
+    name: "roll_dice"
+    description: "Roll one or more dice with specified number of sides."
+    parameters: {
+      type: "object"
+      properties: {
+        sides: {
+          type: "integer"
+          description: "The number of sides on the dice (e.g. 20 for d20, 6 for d6)."
+        }
+        count: {
+          type: "integer"
+          description: "The number of dice to roll."
+        }
+      }
+      required: ["sides" "count"]
+    }
+  }
+  
+  use: roll-dice
+}
+
+; ; Test code
+; Log = tool
+
+; tool:use | ExpectWire = roll-dice-wire
+
+; ; Test rolling 3d20
+; {
+;   sides: 20
+;   count: 3
+; } | WireRunner(roll-dice-wire) | Log
+
+; ; Test rolling 2d6
+; {
+;   sides: 6
+;   count: 2
+; } | WireRunner(roll-dice-wire) | Log 
