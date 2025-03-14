@@ -1,6 +1,6 @@
 # Infrastructure Setup
 
-This directory contains infrastructure and setup files required to run various Edge Talk tools in a sandboxed environment.
+This directory contains infrastructure and setup files required to run various edge talk tools in a sandboxed environment.
 
 ## Contents
 

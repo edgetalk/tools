@@ -1,6 +1,6 @@
-# Edge Talk Tools
+# edge talk Tools
 
-A collection of tools and utilities for Edge Talk, providing various integrations and functionalities to enhance your development workflow.
+A collection of tools and utilities for edge talk, providing various integrations and functionalities to enhance your development workflow.
 
 ## Available Tools
 

@@ -12,7 +12,7 @@
   ; create result table with rolls and sum
   {
     rolls: rolls
-    sum: (rolls | Reduce(Add($0)))
+    sum: (rolls | Fold(Add($0) 0))
   } | ToJson
 })
 

@@ -14,25 +14,48 @@
   definition: {
     name: "text_editor"
     
-    description: """File editor with persistent state and smart modification strategies
+    description: """Persistent File Editor
 
-Key features:
-* State persists across all operations and user interactions
-* `view` shows line-numbered file contents or 2-level directory listings
-* `create` fails if path exists; `undo_edit` reverts last change per file
-* Long outputs truncated with `<response clipped>`
+KEY FEATURES:
+- view: line-numbered file contents OR dirs (output similar to ls command)
+- undo_edit per file, clipped outputs
 
-Modification strategies:
-1. `str_replace` - For single, exact matches in simple files:
-   - Guarantees unique `old_str` match required
-   - Ideal for unstructured content replacements
-2. `insert` - Line-based edits for structured formats (XML/JSON/PLIST):
-   - Use with `view`-obtained line numbers
-   - Preferred for complex/multi-occurrence changes
+STR_REPLACE (Preferred) REQUIREMENTS:
+1. UNIQUE CONTEXT (PER CALL):
+   - 5+ lines EXACT before/after context
+   - Full whitespace/indentation
+   - Exact target string match req
+2. SINGLE-INSTANCE ONLY:
+   - One replacement per call
+   - Multiple=separate calls
+3. PRE-CHECKS MANDATORY:
+   - view to count matches
+   - Capture unique context per instance
 
-Safety notes:
-* Validate matches with `view` before modifying
-* Prefer line numbers for structured data integrity"""
+STRUCTURED INSERT (Alternative):
+- Line-numbers from view
+- For XML/JSON/PLIST
+
+CRITICAL WARNINGS:
+! Fails on multi-matches
+! Fails on whitespace mismatch
+! Wrong context=wrong edit
+
+BEST PRACTICES:
+- Group file edits in single message
+- Multiple str_replace calls OK
+- Atomic undo history preserved
+
+SAFETY PROTOCOLS:
+ALWAYS:
+- Verify match count first
+- Capture 5+ lines before/after
+- Include exact whitespace
+- One change per call
+NEVER:
+- Assume unique matches
+- Use partial context
+- Batch replace"""
     parameters: {
       type: "object"
       properties: {
