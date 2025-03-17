@@ -1,0 +1,163 @@
+@define(latest-protocol-version "2024-11-05")
+
+@define(json-rpc-response {
+  ToJson > response-payload
+  "\n" | AppendTo(response-payload)
+  response-payload | Process.StdOut | Log("Sent response")
+})
+
+@wire(process-tool-call {
+  "Not implemented" | Fail
+})
+
+@wire(server-handler {
+  {"" >= response-payload}
+  ExpectString | String.Trim | Log("Received message")
+  String.Split("\n") | ForEach({
+    FromJson | ExpectTable = body
+    body:method | Match([
+      "initialize" {
+        {
+          jsonrpc: "2.0"
+          id: (body:id)
+          result: {
+            protocolVersion: @latest-protocol-version
+            capabilities: {
+              ; logging: {}
+              ; prompts: {
+              ;   listChanged: true
+              ; }
+              ; resources: {
+              ;   subscribe: true
+              ;   listChanged: true
+              ; }
+              tools: {
+                listChanged: true
+              }
+            }
+            serverInfo: {
+              name: "Shards"
+              version: "0.0.1"
+            }
+          }
+        } | Log("Sending initialize response")
+        @json-rpc-response
+      }
+      "ping" {
+        {
+          jsonrpc: "2.0"
+          id: (body:id)
+          result: {}
+        }
+        @json-rpc-response
+      }
+      "notifications/initialized" {
+        ; {
+        ;   jsonrpc: "2.0"
+        ;   method: "notifications/tools/list_changed"
+        ; } | Log("Sending tools list changed notification")
+        ; @json-rpc-response
+        Pass
+      }
+      "resources/list" {
+        {
+          jsonrpc: "2.0"
+          id: (body:id)
+          result: {
+            resources: []
+            ; nextCursor: "next-page-cursor"
+          }
+        } | Log("Sending resources list")
+        @json-rpc-response
+      }
+      "prompts/list" {
+        {
+          jsonrpc: "2.0"
+          id: (body:id)
+          result: {
+            prompts: []
+            ; nextCursor: "next-page-cursor"
+          }
+        } | Log("Sending prompts list")
+        @json-rpc-response
+      }
+      "tools/list" {
+        {
+          jsonrpc: "2.0"
+          id: (body:id)
+          result: {
+            tools: [
+              {
+                name: "get_weather"
+                description: "Get current weather information for a location"
+                inputSchema: {
+                  type: "object"
+                  properties: {
+                    location: {
+                      type: "string"
+                      description: "City name or zip code"
+                    }
+                  }
+                  required: ["location"]
+                }
+              }]
+            ; nextCursor: "next-page-cursor"
+          }
+        } | Log("Sending tools list")
+        @json-rpc-response
+      }
+      "tools/call" {
+        Maybe({
+            body:params | ExpectTable
+            Do(process-tool-call) | ExpectString = tool-call-result
+            {
+              jsonrpc: "2.0"
+              id: (body:id)
+              result: {
+                content: [
+                  {
+                    type: "text"
+                    text: tool-call-result
+                  }]
+                isError: false
+              }
+            }
+            @json-rpc-response
+          } {
+            CaptureLog(MinLevel: "error" Size: 10) = error-messages
+            
+            {
+              jsonrpc: "2.0"
+              id: (body:id)
+              result: {
+                content: [
+                  {
+                    type: "text"
+                    text: error-messages
+                  }]
+                isError: true
+              }
+            }
+            @json-rpc-response
+          }
+        )
+      }
+      none {
+        Msg("Received unknown message")
+      }
+    ])
+  })
+})
+
+@wire(server-handler-stdio {
+  Process.StdIn
+  Do(server-handler)
+} Looped: true)
+
+@wire(server {
+  Step(server-handler-stdio)
+} Looped: true)
+
+@mesh(root)
+@schedule(root server)
+@run(root FPS: 30.0)
