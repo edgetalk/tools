@@ -5,6 +5,11 @@
 # Use slim Python image for smaller footprint while maintaining functionality
 FROM python:3.12-slim
 
+# Set up Rust environment variables
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
 # Install essential tools and development utilities (non-interactive)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -20,6 +25,13 @@ RUN apt-get update && \
     dnsutils \
     iproute2 \
     netcat-openbsd \
+    gcc \
+    g++ \
+    clang \
+    ninja-build \
+    cmake \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
+    && chmod -R a+w $RUSTUP_HOME $CARGO_HOME \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -35,12 +47,10 @@ VOLUME ["/data"]
 # Setup git configuration to use token from environment
 ENV GITHUB_TOKEN=""
 ENV GITHUB_USER=""
-ENV GIT_USER_NAME=""
-ENV GIT_USER_EMAIL=""
 # Configure git to use the token for HTTPS (if GITHUB_USER is empty, it still works fine)
 RUN git config --global url."https://\${GITHUB_USER:+\${GITHUB_USER}:}\${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
-    git config --global user.name "\${GIT_USER_NAME:-Anonymous}" && \
-    git config --global user.email "\${GIT_USER_EMAIL:-anonymous@example.com}"
+    git config --global user.name "Kaz" && \
+    git config --global user.email "kaz@fragcolor.xyz"
 
 # Expose the port used by the server
 EXPOSE 6666

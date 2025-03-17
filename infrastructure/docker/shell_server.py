@@ -18,7 +18,9 @@ class Shell:
         except OSError as e:
             print(f"[Error] Failed to create PTY: {str(e)}")
             if "administratively prohibited" in str(e):
-                print("[Error] System denied PTY creation. This may be due to security policies or resource limits.")
+                print(
+                    "[Error] System denied PTY creation. This may be due to security policies or resource limits."
+                )
             raise
 
         try:
@@ -85,10 +87,10 @@ class Shell:
                 break
 
         # Update current working directory if 'cd' command is used
-        if cmd.strip().startswith('cd '):
+        if cmd.strip().startswith("cd "):
             try:
                 new_dir = cmd.strip()[3:].strip()
-                if new_dir.startswith('~'):
+                if new_dir.startswith("~"):
                     new_dir = os.path.expanduser(new_dir)
                 self.cwd = os.path.abspath(os.path.join(self.cwd, new_dir))
             except:
@@ -125,7 +127,10 @@ class ShellHandler(BaseHTTPRequestHandler):
     @classmethod
     def get_shell(cls):
         current_time = time.time()
-        if cls.shell is None or (current_time - cls.shell.last_used) > cls.SHELL_IDLE_TIMEOUT:
+        if (
+            cls.shell is None
+            or (current_time - cls.shell.last_used) > cls.SHELL_IDLE_TIMEOUT
+        ):
             if cls.shell is not None:
                 print("[Info] Cleaning up idle shell")
                 cls.shell.cleanup()
@@ -139,6 +144,7 @@ class ShellHandler(BaseHTTPRequestHandler):
         if os.path.exists(backup_path):
             try:
                 import shutil
+
                 shutil.rmtree(backup_path)
             except Exception as e:
                 print(f"[Error] Failed to cleanup backups: {str(e)}")
@@ -159,8 +165,8 @@ class ShellHandler(BaseHTTPRequestHandler):
         if os.path.exists(abs_path):
             try:
                 backup_path = self._get_backup_path(abs_path)
-                with open(abs_path, 'r', encoding='utf-8') as src:
-                    with open(backup_path, 'w', encoding='utf-8') as dst:
+                with open(abs_path, "r", encoding="utf-8") as src:
+                    with open(backup_path, "w", encoding="utf-8") as dst:
                         dst.write(src.read())
             except Exception as e:
                 print(f"[Warning] Failed to create backup for {abs_path}: {str(e)}")
@@ -178,12 +184,12 @@ class ShellHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data)
                 command = data.get("command")
                 path = data.get("path")
-                
+
                 if not command or not path:
                     raise ValueError("Missing required parameters: command and path")
 
                 response = self.handle_text_editor(data)
-                
+
                 self.send_response(200)
                 self.send_header("Content-type", "text/plain")
                 self.end_headers()
@@ -191,6 +197,7 @@ class ShellHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[Error] Text editor operation failed: {str(e)}")
                 import traceback
+
                 print(f"[Error] Traceback: {traceback.format_exc()}")
                 self.send_response(500)
                 self.send_header("Content-type", "text/plain")
@@ -228,7 +235,7 @@ class ShellHandler(BaseHTTPRequestHandler):
                 # Make path relative to shell's current working directory
                 abs_filepath = os.path.join(self.shell.cwd, filepath)
                 print(f"[Debug] Absolute file path: {abs_filepath}")
-                
+
                 # Create backup before modification if file exists
                 self._create_backup(abs_filepath)
 
@@ -242,7 +249,9 @@ class ShellHandler(BaseHTTPRequestHandler):
                 with open(abs_filepath, "w", encoding="utf-8") as f:
                     f.write(content)
 
-                print(f"[Debug] File write complete. Checking if file exists: {os.path.exists(abs_filepath)}")
+                print(
+                    f"[Debug] File write complete. Checking if file exists: {os.path.exists(abs_filepath)}"
+                )
                 if os.path.exists(abs_filepath):
                     print(f"[Debug] File size: {os.path.getsize(abs_filepath)} bytes")
 
@@ -253,6 +262,7 @@ class ShellHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[Error] Failed to write file: {str(e)}")
                 import traceback
+
                 print(f"[Error] Traceback: {traceback.format_exc()}")
                 self.send_response(500)
                 self.send_header("Content-type", "text/plain")
@@ -265,9 +275,9 @@ class ShellHandler(BaseHTTPRequestHandler):
     def _truncate_response(self, response):
         """Truncate response if too long and add <response clipped> marker"""
         if len(response) > self.MAX_RESPONSE_LENGTH:
-            truncated = response[:self.MAX_RESPONSE_LENGTH]
+            truncated = response[: self.MAX_RESPONSE_LENGTH]
             # Try to truncate at the last newline to keep lines intact
-            last_newline = truncated.rfind('\n')
+            last_newline = truncated.rfind("\n")
             if last_newline > 0:
                 truncated = truncated[:last_newline]
             return truncated + "\n<response clipped>"
@@ -276,7 +286,8 @@ class ShellHandler(BaseHTTPRequestHandler):
     def handle_text_editor(self, data):
         command = data["command"]
         path = data["path"]
-        abs_path = os.path.join(self.shell.cwd, path)
+        shell = self.get_shell()  # Get or create shell instance
+        abs_path = os.path.join(shell.cwd, path)
 
         if command == "view":
             if os.path.isfile(abs_path):
@@ -284,126 +295,134 @@ class ShellHandler(BaseHTTPRequestHandler):
                 view_range = data.get("view_range")
                 if view_range:
                     # Validate view_range is an array of 2 integers
-                    if not isinstance(view_range, list) or len(view_range) != 2 or \
-                       not all(isinstance(x, int) for x in view_range):
+                    if (
+                        not isinstance(view_range, list)
+                        or len(view_range) != 2
+                        or not all(isinstance(x, int) for x in view_range)
+                    ):
                         raise ValueError("view_range must be an array of 2 integers")
-                    
+
                     # Validate start line is positive
                     if view_range[0] < 1:
                         raise ValueError("view_range start line must be >= 1")
-                        
+
                     # Validate end line is >= start line
                     if view_range[1] < view_range[0]:
                         raise ValueError("view_range end line must be >= start line")
 
-                with open(abs_path, 'r', encoding='utf-8') as f:
+                with open(abs_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                    
+
                 if view_range:
                     lines = content.splitlines()
                     start = max(0, view_range[0] - 1)  # Convert to 0-based index
                     end = min(len(lines), view_range[1])
-                    content = '\n'.join(lines[start:end])
-                    
+                    content = "\n".join(lines[start:end])
+
                 # Add line numbers
                 numbered_lines = []
                 for i, line in enumerate(content.splitlines(), 1):
                     numbered_lines.append(f"{i:6d}\t{line}")
-                response = '\n'.join(numbered_lines)
+                response = "\n".join(numbered_lines)
                 return self._truncate_response(response)
             elif os.path.isdir(abs_path):
                 # List files and directories up to 2 levels deep
                 result = []
                 for root, dirs, files in os.walk(abs_path):
-                    depth = root[len(abs_path):].count(os.sep)
+                    depth = root[len(abs_path) :].count(os.sep)
                     if depth <= 1:  # Only process up to 2 levels
                         # Skip hidden files/directories
-                        dirs[:] = [d for d in dirs if not d.startswith('.')]
-                        files = [f for f in files if not f.startswith('.')]
-                        
-                        path_prefix = root[len(abs_path):].lstrip(os.sep)
+                        dirs[:] = [d for d in dirs if not d.startswith(".")]
+                        files = [f for f in files if not f.startswith(".")]
+
+                        path_prefix = root[len(abs_path) :].lstrip(os.sep)
                         for name in files:
                             if path_prefix:
                                 result.append(os.path.join(path_prefix, name))
                             else:
                                 result.append(name)
-                response = '\n'.join(sorted(result))
+                response = "\n".join(sorted(result))
                 return self._truncate_response(response)
             else:
                 raise FileNotFoundError(f"Path not found: {path}")
 
         elif command == "create":
-            if os.path.exists(abs_path):
-                raise ValueError(f"Path already exists: {path}")
-            
             file_text = data.get("file_text")
             if not file_text:
                 raise ValueError("file_text parameter is required for create command")
-                
+
+            # Create backup if file exists
+            if os.path.exists(abs_path):
+                self._create_backup(abs_path)
+
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-            with open(abs_path, 'w', encoding='utf-8') as f:
+            with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(file_text)
             return "File created successfully"
 
         elif command == "str_replace":
             old_str = data.get("old_str")
             new_str = data.get("new_str", "")
-            
+
             if not old_str:
-                raise ValueError("old_str parameter is required for str_replace command")
-            
+                raise ValueError(
+                    "old_str parameter is required for str_replace command"
+                )
+
             # Create backup before modification
             self._create_backup(abs_path)
-                
-            with open(abs_path, 'r', encoding='utf-8') as f:
+
+            with open(abs_path, "r", encoding="utf-8") as f:
                 content = f.read()
-                
+
             # Verify old_str exists exactly once
             if content.count(old_str) != 1:
                 raise ValueError("old_str must match exactly one location in the file")
-                
+
             # Perform the replacement
             new_content = content.replace(old_str, new_str)
-            
-            with open(abs_path, 'w', encoding='utf-8') as f:
+
+            with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             return "String replaced successfully"
 
         elif command == "insert":
             insert_line = data.get("insert_line")
             new_str = data.get("new_str")
-            
+
             if insert_line is None or new_str is None:
-                raise ValueError("insert_line and new_str parameters are required for insert command")
-            
+                raise ValueError(
+                    "insert_line and new_str parameters are required for insert command"
+                )
+
             # Create backup before modification
             self._create_backup(abs_path)
-                
-            with open(abs_path, 'r', encoding='utf-8') as f:
+
+            with open(abs_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-                
+
             if not (1 <= insert_line <= len(lines) + 1):
                 raise ValueError(f"Invalid insert_line: {insert_line}")
-                
-            lines.insert(insert_line, new_str + '\n')
-            
-            with open(abs_path, 'w', encoding='utf-8') as f:
+
+            lines.insert(insert_line, new_str + "\n")
+
+            with open(abs_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)
             return "Text inserted successfully"
 
         elif command == "undo_edit":
             if not os.path.exists(abs_path):
                 raise FileNotFoundError(f"File not found: {path}")
-                
+
             backup_path = self._get_backup_path(abs_path)
             if not os.path.exists(backup_path):
                 raise ValueError("No previous version available to undo")
-                
+
             # Restore the backup
-            with open(backup_path, 'r', encoding='utf-8') as src:
-                with open(abs_path, 'w', encoding='utf-8') as dst:
+            with open(backup_path, "r", encoding="utf-8") as src:
+                with open(abs_path, "w", encoding="utf-8") as dst:
                     dst.write(src.read())
-                    
+
             # Remove the backup after restoring
             os.remove(backup_path)
             return "Successfully reverted to previous version"
@@ -430,7 +449,9 @@ class ShellHandler(BaseHTTPRequestHandler):
                 abs_filepath = os.path.join(self.shell.cwd, filepath)
                 print(f"[Debug] Absolute file path: {abs_filepath}")
 
-                print(f"[Debug] Checking if file exists: {os.path.exists(abs_filepath)}")
+                print(
+                    f"[Debug] Checking if file exists: {os.path.exists(abs_filepath)}"
+                )
                 with open(abs_filepath, "r", encoding="utf-8") as f:
                     content = f.read()
                 print(f"[Debug] Read content length: {len(content)} bytes")
@@ -444,6 +465,7 @@ class ShellHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[Error] Failed to read file: {str(e)}")
                 import traceback
+
                 print(f"[Error] Traceback: {traceback.format_exc()}")
                 self.send_response(500)
                 self.send_header("Content-type", "text/plain")
