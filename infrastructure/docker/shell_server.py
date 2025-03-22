@@ -321,8 +321,14 @@ class ShellHandler(BaseHTTPRequestHandler):
 
                 # Add line numbers
                 numbered_lines = []
-                for i, line in enumerate(content.splitlines(), 1):
-                    numbered_lines.append(f"{i:6d}\t{line}")
+                if view_range:
+                    # Use absolute line numbers when view_range is specified
+                    for i, line in enumerate(content.splitlines(), view_range[0]):
+                        numbered_lines.append(f"{i:6d}\t{line}")
+                else:
+                    # Regular numbering when showing the whole file
+                    for i, line in enumerate(content.splitlines(), 1):
+                        numbered_lines.append(f"{i:6d}\t{line}")
                 response = "\n".join(numbered_lines)
                 return self._truncate_response(response)
             elif os.path.isdir(abs_path):
