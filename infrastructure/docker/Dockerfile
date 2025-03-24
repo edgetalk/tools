@@ -1,6 +1,7 @@
 # shell_server.py docker image
 # build like: docker build -t shell-server .
 # run like: docker run -p 6666:6666 -v /path/to/your/local/folder:/data shell-server
+# For building with Shards: docker build --build-arg BUILD_SHARDS=true -t shell-server .
 
 # Use slim Python image for smaller footprint while maintaining functionality
 FROM python:3.12-slim
@@ -9,6 +10,9 @@ FROM python:3.12-slim
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
+
+# ARG for optional Shards building
+ARG BUILD_SHARDS=false
 
 # Install essential tools and development utilities (non-interactive)
 RUN apt-get update && \
@@ -34,6 +38,35 @@ RUN apt-get update && \
     && chmod -R a+w $RUSTUP_HOME $CARGO_HOME \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# Optional Shards build process
+RUN if [ "$BUILD_SHARDS" = "true" ] ; then \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pkg-config \
+        libssl-dev \
+        build-essential \
+        libclang-dev \
+        protobuf-compiler \
+        xorg-dev \
+        libdbus-1-dev \
+        && rm -rf /var/lib/apt/lists/* \
+        && apt-get clean \
+        && rustup default nightly \
+        && rustup update nightly \
+        && rustup target add wasm32-unknown-unknown --toolchain nightly \
+        && git clone --depth 1 --shallow-submodules https://github.com/fragcolor-xyz/shards.git /shards \
+        && cd /shards \
+        && sh update.sh \
+        && ./bootstrap \
+        && mkdir -p build \
+        && cd build \
+        && cmake -GNinja -DCMAKE_BUILD_TYPE=Release .. \
+        && ninja shards \
+        && cp shards /usr/local/bin/ \
+        && cd / \
+        && rm -rf /shards; \
+    fi
 
 # Set working directory
 WORKDIR /app
