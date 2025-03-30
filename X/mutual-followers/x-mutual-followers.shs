@@ -1,0 +1,72 @@
+@wire(get-mutual-followers {
+  {Take("max_results") | ExpectInt = max_results}
+  
+  1 | X.Auth = auth-token
+  1 | X.UserId = user-id
+  
+  ; Create headers with the auth token
+  {
+    "Authorization": (["Bearer " auth-token] | String.Join)
+  } = headers
+  
+  ; Construct the URL with the user ID
+  ["https://api.twitter.com/2/users/" user-id "/followers"] | String.Join = base_url
+  
+  ; Add query parameters to get connection_status and other useful fields
+  {
+    "max_results": (max_results | ToString)
+    "user.fields": "id,name,username,profile_image_url,connection_status"
+  } | Http.Get(URL: base_url Headers: headers) | FromJson | ExpectTable = followers_data
+  
+  Sequence(mutual_followers)
+  
+  ; Extract followers who also follow you (mutual)
+  followers_data | Take("data") | ExpectSeq | ForEach({
+    ExpectTable = follower-data
+    ; Check if connection_status contains "following" (you follow them)
+    Take("connection_status") | When(Predicate: {
+        IsAny("following")
+      } Action: {
+        ; This is a mutual follower, keep their info
+        follower-data
+        {
+          id: (Take("id"))
+          name: (Take("name"))
+          username: (Take("username"))
+          profile_image_url: (Take("profile_image_url"))
+        } >> mutual_followers
+      }
+    )
+  })
+  
+  ; Create pagination info if available
+  followers_data | Take("meta") | ExpectTable | Take("next_token") = next_token ; can be none
+  
+  ; Construct the final result
+  {
+    success: true
+    mutual_followers: mutual_followers
+    count: (Count(mutual_followers))
+    next_token: next_token
+  } | ToJson
+})
+
+; this is the definition of the tool
+{
+  definition: {
+    name: "x_mutual_followers"
+    description: "Get users who follow you that you also follow (mutual followers)."
+    parameters: {
+      type: "object"
+      properties: {
+        max_results: {
+          type: "integer"
+          description: "Maximum number of results to return (1-1000)."
+        }
+      }
+      required: ["user-id"]
+    }
+  }
+  
+  use: get-mutual-followers
+}
