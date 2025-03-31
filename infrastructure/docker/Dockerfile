@@ -39,33 +39,49 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# just a way to invalidate the cache
+RUN echo "1"
+
 # Optional Shards build process
 RUN if [ "$BUILD_SHARDS" = "true" ] ; then \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        pkg-config \
-        libssl-dev \
-        build-essential \
-        libclang-dev \
-        protobuf-compiler \
-        xorg-dev \
-        libdbus-1-dev \
-        && rm -rf /var/lib/apt/lists/* \
-        && apt-get clean \
-        && rustup default nightly \
-        && rustup update nightly \
-        && rustup target add wasm32-unknown-unknown --toolchain nightly \
-        && git clone --depth 1 --shallow-submodules https://github.com/fragcolor-xyz/shards.git /shards \
-        && cd /shards \
-        && sh update.sh \
-        && ./bootstrap \
-        && mkdir -p build \
-        && cd build \
-        && cmake -GNinja -DCMAKE_BUILD_TYPE=Release .. \
-        && ninja shards \
-        && cp shards /usr/local/bin/ \
-        && cd / \
-        && rm -rf /shards; \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    libclang-dev \
+    protobuf-compiler \
+    xorg-dev \
+    libdbus-1-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean; \
+    fi
+
+# Setup Rust toolchain for Shards
+RUN if [ "$BUILD_SHARDS" = "true" ] ; then \
+    rustup default nightly && \
+    rustup update nightly && \
+    rustup target add wasm32-unknown-unknown --toolchain nightly; \
+    fi
+
+# Clone and prepare Shards
+RUN if [ "$BUILD_SHARDS" = "true" ] ; then \
+    git clone --depth 1 --shallow-submodules https://github.com/fragcolor-xyz/shards.git /shards && \
+    cd /shards && \
+    sh update.sh && \
+    ./bootstrap; \
+    fi
+
+# Build and install Shards
+RUN if [ "$BUILD_SHARDS" = "true" ] ; then \
+    cd /shards && \
+    mkdir -p build && \
+    cd build && \
+    cmake -GNinja -DCMAKE_BUILD_TYPE=Release .. && \
+    ninja shards && \
+    cp shards /usr/local/bin/ && \
+    cd / && \
+    rm -rf /shards; \
     fi
 
 # Set working directory
