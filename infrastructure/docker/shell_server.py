@@ -233,8 +233,14 @@ class ShellHandler(BaseHTTPRequestHandler):
                 print(f"[Debug] Current working directory: {self.shell.cwd}")
                 print(f"[Debug] Requested file path: {filepath}")
 
-                # Make path relative to shell's current working directory
-                abs_filepath = os.path.join(self.shell.cwd, filepath)
+                # Expand tilde in filepath
+                if filepath.startswith("~/"):
+                    filepath = os.path.expanduser(filepath)
+                    abs_filepath = filepath
+                else:
+                    # Make path relative to shell's current working directory
+                    abs_filepath = os.path.join(self.shell.cwd, filepath)
+                
                 print(f"[Debug] Absolute file path: {abs_filepath}")
 
                 # Create backup before modification if file exists
@@ -288,7 +294,15 @@ class ShellHandler(BaseHTTPRequestHandler):
         command = data["command"]
         path = data["path"]
         shell = self.get_shell()  # Get or create shell instance
-        abs_path = os.path.join(shell.cwd, path)
+        
+        # Expand tilde in path
+        if path.startswith("~/"):
+            path = os.path.expanduser(path)
+            abs_path = path
+        else:
+            abs_path = os.path.join(shell.cwd, path)
+        
+        print(f"[Debug] Text editor: {command} operation on file: {abs_path}")
 
         if command == "view":
             if os.path.isfile(abs_path):
@@ -452,8 +466,14 @@ class ShellHandler(BaseHTTPRequestHandler):
                 if ".." in filepath:
                     raise ValueError("Invalid file path")
 
-                # Make path relative to shell's current working directory
-                abs_filepath = os.path.join(self.shell.cwd, filepath)
+                # Expand tilde in filepath
+                if filepath.startswith("~/"):
+                    filepath = os.path.expanduser(filepath)
+                    abs_filepath = filepath
+                else:
+                    # Make path relative to shell's current working directory
+                    abs_filepath = os.path.join(self.shell.cwd, filepath)
+                
                 print(f"[Debug] Absolute file path: {abs_filepath}")
 
                 print(
