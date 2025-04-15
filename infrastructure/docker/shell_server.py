@@ -75,6 +75,7 @@ class Shell:
 
     def execute(self, cmd):
         self.last_used = time.time()  # Update last used timestamp
+        print(f"[Debug] Executing command: {cmd}")
         os.write(self.master_fd, (cmd + "\n").encode())
         output = []
 
