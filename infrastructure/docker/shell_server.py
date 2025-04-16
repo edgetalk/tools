@@ -1,3 +1,4 @@
+import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import pty
 import os
@@ -9,10 +10,24 @@ import json
 import signal
 import sys
 import time
+import tty
+
+
+def read_single_keypress():
+    """Read a single keypress from stdin in a cross-platform way"""
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
 
 
 class Shell:
-    def __init__(self):
+    def __init__(self, secure_mode=False):
+        self.secure_mode = secure_mode
         try:
             self.master_fd, slave_fd = pty.openpty()
         except OSError as e:
@@ -75,6 +90,20 @@ class Shell:
 
     def execute(self, cmd):
         self.last_used = time.time()  # Update last used timestamp
+        
+        # Secure mode confirmation
+        if self.secure_mode:
+            print(f"[Secure Mode] Execute command: {cmd}")
+            print("[Secure Mode] Press ENTER to continue or ESC to abort")
+            
+            key = read_single_keypress()
+            if key == '\x1b':  # ESC key
+                print("[Secure Mode] Command aborted by user")
+                return "Command aborted by user"
+            elif key != '\r':  # Not ENTER key
+                print("[Secure Mode] Invalid key. Command aborted")
+                return "Command aborted: Invalid key press"
+        
         print(f"[Debug] Executing command: {cmd}")
         os.write(self.master_fd, (cmd + "\n").encode())
         output = []
@@ -124,6 +153,7 @@ class ShellHandler(BaseHTTPRequestHandler):
     backup_dir = ".edits_backup"
     MAX_RESPONSE_LENGTH = 50000  # characters
     SHELL_IDLE_TIMEOUT = 300  # 5 minutes
+    secure_mode = False
 
     @classmethod
     def get_shell(cls):
@@ -135,8 +165,25 @@ class ShellHandler(BaseHTTPRequestHandler):
             if cls.shell is not None:
                 print("[Info] Cleaning up idle shell")
                 cls.shell.cleanup()
-            cls.shell = Shell()
+            cls.shell = Shell(secure_mode=cls.secure_mode)
         return cls.shell
+
+    @classmethod
+    def confirm_destructive_operation(cls, operation_desc):
+        """Ask for confirmation before performing destructive operations in secure mode"""
+        if cls.secure_mode:
+            print(f"[Secure Mode] {operation_desc}")
+            print("[Secure Mode] Press ENTER to continue or ESC to abort")
+            
+            key = read_single_keypress()
+            if key == '\x1b':  # ESC key
+                print("[Secure Mode] Operation aborted by user")
+                return False
+            elif key != '\r':  # Not ENTER key
+                print("[Secure Mode] Invalid key. Operation aborted")
+                return False
+            return True
+        return True  # Always allow in non-secure mode
 
     @classmethod
     def cleanup_backups(cls):
@@ -242,6 +289,14 @@ class ShellHandler(BaseHTTPRequestHandler):
                     abs_filepath = os.path.join(self.shell.cwd, filepath)
                 
                 print(f"[Debug] Absolute file path: {abs_filepath}")
+
+                # Check if we need confirmation in secure mode
+                if not self.confirm_destructive_operation(f"Write file: {abs_filepath}"):
+                    self.send_response(403)
+                    self.send_header("Content-type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"Operation aborted by user")
+                    return
 
                 # Create backup before modification if file exists
                 self._create_backup(abs_filepath)
@@ -371,6 +426,10 @@ class ShellHandler(BaseHTTPRequestHandler):
             file_text = data.get("file_text")
             if not file_text:
                 raise ValueError("file_text parameter is required for create command")
+                
+            # Check if we need confirmation in secure mode
+            if not self.confirm_destructive_operation(f"Create file: {abs_path}"):
+                return "Operation aborted by user"
 
             # Create backup if file exists
             if os.path.exists(abs_path):
@@ -389,6 +448,10 @@ class ShellHandler(BaseHTTPRequestHandler):
                 raise ValueError(
                     "old_str parameter is required for str_replace command"
                 )
+                
+            # Check if we need confirmation in secure mode
+            if not self.confirm_destructive_operation(f"Replace text in file: {abs_path}"):
+                return "Operation aborted by user"
 
             # Create backup before modification
             self._create_backup(abs_path)
@@ -415,6 +478,10 @@ class ShellHandler(BaseHTTPRequestHandler):
                 raise ValueError(
                     "insert_line and new_str parameters are required for insert command"
                 )
+                
+            # Check if we need confirmation in secure mode
+            if not self.confirm_destructive_operation(f"Insert text in file: {abs_path}"):
+                return "Operation aborted by user"
 
             # Create backup before modification
             self._create_backup(abs_path)
@@ -434,6 +501,10 @@ class ShellHandler(BaseHTTPRequestHandler):
         elif command == "undo_edit":
             if not os.path.exists(abs_path):
                 raise FileNotFoundError(f"File not found: {path}")
+                
+            # Check if we need confirmation in secure mode
+            if not self.confirm_destructive_operation(f"Undo edit to file: {abs_path}"):
+                return "Operation aborted by user"
 
             backup_path = self._get_backup_path(abs_path)
             if not os.path.exists(backup_path):
@@ -509,6 +580,17 @@ def signal_handler(signum, frame):
 
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Start shell server')
+    parser.add_argument('--secure', action='store_true', help='Enable secure mode with command confirmation')
+    args = parser.parse_args()
+    
+    # Set secure mode based on command line argument
+    ShellHandler.secure_mode = args.secure
+    
+    if args.secure:
+        print("Starting server in SECURE MODE - commands will require confirmation")
+    
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
