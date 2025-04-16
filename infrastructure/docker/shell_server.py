@@ -11,6 +11,7 @@ import signal
 import sys
 import time
 import tty
+import re
 
 
 def read_single_keypress():
@@ -60,6 +61,15 @@ class Shell:
                         "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
                         "PS1": "$ ",
                         "LANG": "en_US.UTF-8",
+                        # Prevent paging in various tools
+                        "PAGER": "cat",
+                        "GIT_PAGER": "cat",
+                        "LESS": "-FRX",
+                        "MORE": "-FX",
+                        # Disable interactive prompting in common utilities
+                        "GIT_CONFIG_PARAMETERS": "'core.pager=cat' 'color.ui=never'",
+                        # No fancy prompts
+                        "PROMPT_COMMAND": "",
                     }
                     os.execvpe("/bin/bash", ["/bin/bash", "--login"], env)
                 except Exception as e:
@@ -67,11 +77,34 @@ class Shell:
                     os._exit(1)
 
             os.close(slave_fd)
+            # Set up non-interactive terminal
+            self._setup_non_interactive_terminal()
             self._read_output(timeout=1.0)
         except Exception as e:
             print(f"[Error] Shell initialization failed: {str(e)}")
             self.cleanup()
             raise
+
+    def _setup_non_interactive_terminal(self):
+        """Configure the terminal to be non-interactive"""
+        try:
+            # Disable terminal paging
+            cmds = [
+                "stty -icanon -echo",
+                "export PAGER=cat",
+                "export GIT_PAGER=cat",
+                "export LESS='-FRX'",
+                "export MORE='-FX'",
+                "export GIT_CONFIG_PARAMETERS=\"'core.pager=cat' 'color.ui=never'\"",
+                "alias more=cat",
+                "alias less=cat",
+                "alias git='git -c core.pager=cat -c color.ui=never'",
+            ]
+            for cmd in cmds:
+                os.write(self.master_fd, (cmd + "\n").encode())
+                self._read_output(timeout=0.1)  # Clear output
+        except Exception as e:
+            print(f"[Warning] Failed to set up non-interactive terminal: {str(e)}")
 
     def _read_output(self, timeout=0.1):
         output = []
@@ -86,7 +119,23 @@ class Shell:
                 output.append(data.decode("utf-8", errors="replace"))
         except (OSError, IOError):
             pass
-        return "".join(output)
+        
+        # Join the output into a string
+        result = "".join(output)
+        
+        # Remove common terminal control sequences
+        result = self._strip_control_sequences(result)
+        
+        return result
+        
+    def _strip_control_sequences(self, text):
+        """Strip common terminal control sequences from the output"""
+        # Pattern to match common terminal control sequences
+        # This includes color codes, cursor movement, and other control characters
+        control_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][0-9;]*[a-zA-Z]|\r|\x1b\(B')
+        
+        # Remove the control sequences
+        return control_pattern.sub('', text)
 
     def execute(self, cmd):
         self.last_used = time.time()  # Update last used timestamp
@@ -103,6 +152,14 @@ class Shell:
             elif key != '\r':  # Not ENTER key
                 print("[Secure Mode] Invalid key. Command aborted")
                 return "Command aborted: Invalid key press"
+        
+        # Generic solution for handling interactive programs
+        # Use unbuffer to force programs to use line-buffered output
+        if '|' not in cmd and not cmd.strip().startswith(('cd ', 'export ', 'alias ')):
+            # Only modify commands that aren't pipelines or shell built-ins
+            # Adding 'PAGER=cat' as a prefix forces non-interactive operation
+            cmd = f"PAGER=cat LESS=FRX GIT_PAGER=cat {cmd}"
+            print(f"[Debug] Modified command for non-interactive mode: {cmd}")
         
         print(f"[Debug] Executing command: {cmd}")
         os.write(self.master_fd, (cmd + "\n").encode())
