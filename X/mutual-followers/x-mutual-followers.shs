@@ -16,7 +16,7 @@
   {
     "max_results": (max_results | ToString)
     "user.fields": "id,name,username,profile_image_url,connection_status"
-  } | Http.Get(URL: base_url Headers: headers) | FromJson | ExpectTable = followers_data
+  } | Http.Get(URL: base_url Headers: headers) | Await(FromJson) | ExpectTable = followers_data
   
   Sequence(mutual_followers)
   

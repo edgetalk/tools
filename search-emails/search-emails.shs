@@ -18,7 +18,7 @@
     q: query
     orderBy: "date" ; order by date
   } | Log("query") | Http.Get("https://gmail.googleapis.com/gmail/v1/users/me/messages" Headers: headers)
-  FromJson | ExpectTable | Take("messages")
+  Await(FromJson) | ExpectTable | Take("messages")
   When(IsSeq {
     ExpectSeq
     ForEach({
@@ -30,7 +30,7 @@
       "" >= date
       ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = url
       {format: "metadata"} | Http.Get(url Headers: headers) | Log("email")
-      FromJson | ExpectTable
+      Await(FromJson) | ExpectTable
       {Take("snippet") | ExpectString = snippet}
       Take("payload") | ExpectTable
       Take("headers") | ExpectSeq

@@ -14,7 +14,7 @@
   {"" >= response-payload}
   ExpectString | String.Trim | Log("Received message")
   String.Split("\n") | ForEach({
-    FromJson | ExpectTable = body
+    Await(FromJson) | ExpectTable = body
     body:method | Match([
       "initialize" {
         {

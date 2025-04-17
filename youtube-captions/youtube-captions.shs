@@ -42,7 +42,7 @@
     "racyCheckOk": false
     "contentCheckOk": false
   } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" Headers: @headers Timeout: 30)
-  FromJson | ExpectTable
+  Await(FromJson) | ExpectTable
   {Take("videoDetails") | ExpectTable
     {Take("title") | ExpectString | AppendTo(output)
       "\n\n" | AppendTo(output)
