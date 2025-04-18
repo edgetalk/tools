@@ -13,6 +13,12 @@ import time
 import tty
 import re
 
+# ANSI Color Codes
+COLOR_RED = '\033[91m'
+COLOR_RESET = '\033[0m'
+
+# Add a regex pattern to detect shell prompts
+PROMPT_PATTERN = re.compile(r'[^>\n]*[$#>]\s*$')
 
 def read_single_keypress():
     """Read a single keypress from stdin in a cross-platform way"""
@@ -29,6 +35,12 @@ def read_single_keypress():
 class Shell:
     def __init__(self, secure_mode=False):
         self.secure_mode = secure_mode
+        self.master_fd = None
+        self.pid = None
+        self.cwd = os.getcwd()  # Track initial working directory
+        self.last_used = time.time()  # Track when the shell was last used
+        self.pending_interactive_context = None # Clear any pending state on initialization
+        
         try:
             self.master_fd, slave_fd = pty.openpty()
         except OSError as e:
@@ -40,8 +52,7 @@ class Shell:
             raise
 
         try:
-            self.cwd = os.getcwd()  # Track initial working directory
-            self.last_used = time.time()  # Track when the shell was last used
+            # Set non-blocking mode on master fd
             fcntl.fcntl(self.master_fd, fcntl.F_SETFL, os.O_NONBLOCK)
 
             self.pid = os.fork()
@@ -136,22 +147,87 @@ class Shell:
         
         # Remove the control sequences
         return control_pattern.sub('', text)
+        
+    def _is_prompt(self, text):
+        """Check if the text ends with a shell prompt"""
+        return bool(PROMPT_PATTERN.search(text.rstrip()))
 
+    def _update_cwd(self):
+        """Ask the shell for its current working directory and update self.cwd."""
+        marker = "---CWD_MARKER---"
+        try:
+            os.write(self.master_fd, (f'pwd && echo "{marker}"\n').encode())
+            pwd_output = ""
+            # Read output specifically for pwd, longer timeout might be needed if shell is slow
+            for _ in range(15): # Read for up to ~3 seconds
+                chunk = self._read_output(0.2)
+                if chunk:
+                    pwd_output += chunk
+                if marker in pwd_output: # Check accumulated output
+                    break
+                if not chunk: # Stop if no output for a while
+                    time.sleep(0.1)
+            
+            pwd_lines = pwd_output.splitlines()
+            found_cwd = False
+            # Find the line immediately preceding the marker
+            for i in range(len(pwd_lines)):
+                if pwd_lines[i] == marker and i > 0:
+                    potential_cwd = pwd_lines[i-1]
+                    # Basic validation: Check if it looks like a path
+                    if potential_cwd.startswith("/") or potential_cwd.startswith("~"):
+                        self.cwd = potential_cwd
+                        print(f"[Debug] Updated CWD via pwd: {self.cwd}")
+                        found_cwd = True
+                        break
+                    else:
+                        print(f"[Warning] Line before CWD marker doesn't look like a path: {potential_cwd}")
+            
+            if not found_cwd:
+                 # Fallback: Try to find the last line before marker that looks like a path
+                 for i in range(len(pwd_lines) - 2, -1, -1):
+                     if pwd_lines[i+1] == marker and (pwd_lines[i].startswith("/") or pwd_lines[i].startswith("~")):
+                         self.cwd = pwd_lines[i]
+                         print(f"[Debug] Updated CWD via pwd (fallback): {self.cwd}")
+                         found_cwd = True
+                         break
+                 if not found_cwd:
+                    print(f"[Warning] Could not reliably determine CWD from pwd output: {pwd_output}")
+
+        except Exception as e:
+             print(f"[Warning] Failed to update CWD via pwd: {e}")
+             # Keep the old self.cwd as a fallback
     def execute(self, cmd):
         self.last_used = time.time()  # Update last used timestamp
-        
+
+        # --- Interaction Handling: Check for and clear pending interactive command ---
+        if self.pending_interactive_context:
+            print(f"[Info] New command received while interactive command (PID: {self.pid}) was pending. Cancelling previous command.")
+            # We don't kill the process as it's the same shell process
+            # Just clear the pending state
+            self.pending_interactive_context = None
+            # Send Ctrl+C to interrupt any running command
+            try:
+                os.write(self.master_fd, "\x03".encode())
+                time.sleep(0.1)  # Give it a moment to process the interrupt
+                self._read_output(0.2)  # Clear any output from the interrupt
+            except OSError as e:
+                print(f"[Warning] Failed to send interrupt: {e}")
+        # --- End Interaction Handling ---
+
         # Secure mode confirmation
         if self.secure_mode:
-            print(f"[Secure Mode] Execute command: {cmd}")
-            print("[Secure Mode] Press ENTER to continue or ESC to abort")
+            print(f'{COLOR_RED}[Secure Mode] Execute command: {cmd}{COLOR_RESET}')
+            print(f'{COLOR_RED}[Secure Mode] Press ENTER to continue or ESC to abort{COLOR_RESET}')
             
             key = read_single_keypress()
             if key == '\x1b':  # ESC key
-                print("[Secure Mode] Command aborted by user")
-                return "Command aborted by user"
+                print(f'{COLOR_RED}[Secure Mode] Command aborted by user{COLOR_RESET}')
+                # Return JSON error for consistency
+                return json.dumps({'status': 'error', 'message': 'Command aborted by user in secure mode'})
             elif key != '\r':  # Not ENTER key
-                print("[Secure Mode] Invalid key. Command aborted")
-                return "Command aborted: Invalid key press"
+                print(f'{COLOR_RED}[Secure Mode] Invalid key. Command aborted{COLOR_RESET}')
+                return json.dumps({'status': 'error', 'message': 'Command aborted: Invalid key press in secure mode'})
         
         # Generic solution for handling interactive programs
         # Use unbuffer to force programs to use line-buffered output
@@ -162,47 +238,119 @@ class Shell:
             print(f"[Debug] Modified command for non-interactive mode: {cmd}")
         
         print(f"[Debug] Executing command: {cmd}")
-        os.write(self.master_fd, (cmd + "\n").encode())
-        output = []
-
-        for _ in range(10):
-            chunk = self._read_output(0.1)
-            if not chunk:
-                break
-            output.append(chunk)
-            if chunk.rstrip().endswith("$ "):
-                break
-
-        # Update current working directory if 'cd' command is used
-        if cmd.strip().startswith("cd "):
+        try:
+            os.write(self.master_fd, (cmd + "\n").encode())
+        except OSError as e:
+            print(f"[Error] Failed to write command to shell: {e}")
+            # Try to recover by restarting the shell
+            self.cleanup()
+            self.__init__(secure_mode=self.secure_mode)
+            # Try again with the new shell
+            os.write(self.master_fd, (cmd + "\n").encode())
+            
+        # --- EXECUTE LOGIC START ---
+        output_buffer = []
+        command_completed = False
+        prompt_detected = False
+        timed_out_waiting = False
+        
+        # Read initial output, checking for prompt or hang
+        # Increased loop count and slightly longer total wait time
+        for i in range(30): # Check for ~3 seconds total (30 * 0.1s)
             try:
-                new_dir = cmd.strip()[3:].strip()
-                if new_dir.startswith("~"):
-                    new_dir = os.path.expanduser(new_dir)
-                self.cwd = os.path.abspath(os.path.join(self.cwd, new_dir))
-            except:
-                pass
+                chunk = self._read_output(0.1)
+                if chunk:
+                    output_buffer.append(chunk)
+                    current_output = "".join(output_buffer)
+                    # Check if a prompt appears in the current accumulated output
+                    if self._is_prompt(current_output):
+                        prompt_detected = True
+                        print(f"[Debug] Prompt detected: {current_output[-30:].strip()}")
+                        break
+                elif i > 5: # Require at least a few checks before declaring timeout
+                    # Check if process is still running before declaring timeout
+                    try:
+                        pid, status = os.waitpid(self.pid, os.WNOHANG)
+                        if pid == 0: # Process is still running, likely waiting
+                            timed_out_waiting = True
+                            break
+                        else: # Process ended without prompt
+                            command_completed = True
+                            break
+                    except OSError: # Process already reaped or invalid
+                        command_completed = True
+                        break
+            except Exception as e:
+                print(f"[Warning] Error during output reading: {e}")
+                break
 
-        result = "".join(output)
+        # --- Interaction Handling: Check for Hang ---
+        if timed_out_waiting and not prompt_detected:
+            print(f"[Info] Command '{cmd}' timed out waiting for output/prompt. Process {self.pid} still running. Entering interactive mode.")
+            self.pending_interactive_context = { 'cmd': cmd }
+            # Return minimal output collected so far, plus the interaction signal
+            initial_output = "".join(output_buffer)
+            # Clean the initial output
+            lines = initial_output.split("\n")
+            if lines and lines[0].strip() == cmd: lines = lines[1:] # Remove command echo
+            cleaned_output = "\n".join(line for line in lines if line.strip()) # Remove empty lines
+
+            # Return JSON response for interaction
+            response_data = {
+                'status': 'requires_interaction', 
+                'output': self._strip_control_sequences(cleaned_output), # Return stripped initial output
+                'message': 'Command is waiting. Use /cmd with "input_str" to view output or send input. Use /cmd with a new "cmd" to cancel and run a new command.'
+            }
+            return json.dumps(response_data) # Return JSON string directly
+        # --- End Interaction Handling ---
+
+        # If we got here, the command either completed or returned to prompt quickly
+        self.pending_interactive_context = None # Ensure no pending state
+
+        # Process output if command completed or prompt was seen
+        result = "".join(output_buffer)
+        
+        # Update CWD after command execution
+        self._update_cwd()
+
+        # Clean output: remove command echo and trailing prompt
         lines = result.split("\n")
         if lines and lines[0].strip() == cmd:
             lines = lines[1:]
-        if lines and lines[-1].strip().endswith("$ "):
-            lines = lines[:-1]
-        return "\n".join(line for line in lines if line.strip())
+        
+        # More robust prompt removal from final line
+        if lines and self._is_prompt(lines[-1]):
+            lines.pop()  # Remove the prompt line completely
+        
+        final_output = "\n".join(line for line in lines if line.strip()) # Filter empty lines
+        
+        # Return JSON response for completion
+        response_data = {
+            'status': 'completed', 
+            'output': self._strip_control_sequences(final_output)
+        }
+        return json.dumps(response_data) # Return JSON string directly
+        # --- EXECUTE LOGIC END ---
+
 
     def cleanup(self):
-        if self.pid:
+        self.pending_interactive_context = None # Clear any pending state on cleanup
+        if hasattr(self, 'pid') and self.pid:
             try:
                 os.kill(self.pid, signal.SIGKILL)  # Using SIGKILL instead of SIGTERM
                 os.waitpid(self.pid, 0)
-            except:
-                pass
-        if self.master_fd:
+            except OSError as e:
+                print(f"[Warning] Failed to kill process {self.pid}: {e}")
+            except Exception as e:
+                print(f"[Warning] Error during process cleanup: {e}")
+        if hasattr(self, 'master_fd') and self.master_fd is not None:
             try:
                 os.close(self.master_fd)
-            except:
-                pass
+                self.master_fd = None
+            except OSError as e:
+                print(f"[Warning] Failed to close master_fd: {e}")
+            except Exception as e:
+                print(f"[Warning] Error during file descriptor cleanup: {e}")
 
 
 class ShellHandler(BaseHTTPRequestHandler):
@@ -215,29 +363,40 @@ class ShellHandler(BaseHTTPRequestHandler):
     @classmethod
     def get_shell(cls):
         current_time = time.time()
-        if (
-            cls.shell is None
-            or (current_time - cls.shell.last_used) > cls.SHELL_IDLE_TIMEOUT
-        ):
+        try:
+            if (
+                cls.shell is None
+                or (current_time - cls.shell.last_used) > cls.SHELL_IDLE_TIMEOUT
+            ):
+                if cls.shell is not None:
+                    print("[Info] Cleaning up idle shell")
+                    cls.shell.cleanup()
+                cls.shell = Shell(secure_mode=cls.secure_mode)
+            return cls.shell
+        except Exception as e:
+            print(f"[Error] Failed to get shell: {e}")
+            # If there was an error, try to clean up and create a new shell
             if cls.shell is not None:
-                print("[Info] Cleaning up idle shell")
-                cls.shell.cleanup()
+                try:
+                    cls.shell.cleanup()
+                except:
+                    pass
             cls.shell = Shell(secure_mode=cls.secure_mode)
-        return cls.shell
+            return cls.shell
 
     @classmethod
     def confirm_destructive_operation(cls, operation_desc):
         """Ask for confirmation before performing destructive operations in secure mode"""
         if cls.secure_mode:
-            print(f"[Secure Mode] {operation_desc}")
-            print("[Secure Mode] Press ENTER to continue or ESC to abort")
+            print(f'{COLOR_RED}[Secure Mode] {operation_desc}{COLOR_RESET}')
+            print(f'{COLOR_RED}[Secure Mode] Press ENTER to continue or ESC to abort{COLOR_RESET}')
             
             key = read_single_keypress()
             if key == '\x1b':  # ESC key
-                print("[Secure Mode] Operation aborted by user")
+                print(f'{COLOR_RED}[Secure Mode] Operation aborted by user{COLOR_RESET}')
                 return False
             elif key != '\r':  # Not ENTER key
-                print("[Secure Mode] Invalid key. Operation aborted")
+                print(f'{COLOR_RED}[Secure Mode] Invalid key. Operation aborted{COLOR_RESET}')
                 return False
             return True
         return True  # Always allow in non-secure mode
@@ -312,20 +471,139 @@ class ShellHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers["Content-Length"])
             post_data = self.rfile.read(content_length)
             try:
-                cmd = json.loads(post_data)["cmd"]
+                data = json.loads(post_data)
                 shell = self.get_shell()  # Get or create shell
-                output = shell.execute(cmd)
-                response = self._truncate_response(output)
+                
+                # Check if this is an interaction request or a command request
+                if "input_str" in data:
+                    # This is an interaction request (formerly /interact)
+                    input_str = data.get("input_str", "")
+                    
+                    # Check if there is a pending interactive context
+                    if not shell.pending_interactive_context:
+                        raise ValueError("No interactive command pending")
+    
+                    # Send input if provided
+                    if input_str:
+                        print(f"[Debug] Sending input to interactive command: {input_str[:50]}...")
+                        try:
+                            os.write(shell.master_fd, (input_str + '\n').encode())
+                        except OSError as e:
+                            # Handle cases where the process might have died unexpectedly
+                            print(f"[Warning] Failed to write input: {e}")
+                            # Try to recover by checking process status
+                            try:
+                                pid, _ = os.waitpid(shell.pid, os.WNOHANG)
+                                if pid == shell.pid:
+                                    shell.pending_interactive_context = None
+                                    raise ValueError(f"Process terminated unexpectedly before input could be sent.")
+                            except OSError:
+                                shell.pending_interactive_context = None
+                                raise ValueError(f"Process seems to have terminated.")
+                            # If we get here, the process is still alive but write failed
+                            # Try to recover by sending a Ctrl+C and clearing the interactive state
+                            try:
+                                os.write(shell.master_fd, "\x03".encode()) # Send Ctrl+C
+                                shell.pending_interactive_context = None
+                                raise ValueError("Interactive session reset due to I/O error")
+                            except:
+                                # If that also fails, we're in trouble
+                                shell.pending_interactive_context = None
+                                raise ValueError("Interactive session terminated due to unrecoverable I/O error")
+    
+                    # Read output (use a slightly longer timeout than execute loop)
+                    output_buffer = []
+                    prompt_detected = False
+                    process_terminated = False
+                    
+                    # Try to read output for up to 1 second
+                    for _ in range(10): 
+                        try:
+                            chunk = shell._read_output(0.1)
+                            if chunk:
+                                output_buffer.append(chunk)
+                                # Check for prompt in the accumulated output
+                                current_output = "".join(output_buffer)
+                                if shell._is_prompt(current_output):
+                                    prompt_detected = True
+                                    print(f"[Debug] Interactive prompt detected: {current_output[-30:].strip()}")
+                                    break # Stop reading if prompt is seen
+                        except Exception as e:
+                            print(f"[Warning] Error reading output: {e}")
+                            break
+                            
+                        # Check if the process is still running
+                        try:
+                            pid, status = os.waitpid(shell.pid, os.WNOHANG)
+                            if pid == shell.pid:
+                                process_terminated = True
+                                print(f"[Info] Shell process {shell.pid} terminated.")
+                                break
+                        except OSError:
+                            # Process already reaped or gone
+                            process_terminated = True
+                            print(f"[Info] Shell process {shell.pid} already terminated.")
+                            break
+                        
+                        # If no output and process not terminated, wait a bit more
+                        if not chunk:
+                            time.sleep(0.1) # Small delay before next check
+    
+                    result = "".join(output_buffer)
+                    
+                    # Clean the result by removing the prompt if present
+                    lines = result.split("\n")
+                    if lines and shell._is_prompt(lines[-1]):
+                        lines.pop()  # Remove the prompt line
+                        
+                    cleaned_output = shell._strip_control_sequences("\n".join(lines))
+    
+                    # Decide response based on state
+                    if process_terminated or prompt_detected:
+                        print(f"[Info] Interactive session completed.")
+                        shell.pending_interactive_context = None # Clear the pending state
+                        response_data = {
+                            'status': 'completed',
+                            'output': self._truncate_response(cleaned_output) # Truncate here
+                        }
+                    else:
+                        # Still running, waiting for more input or processing
+                        response_data = {
+                            'status': 'pending_output',
+                            'output': self._truncate_response(cleaned_output), # Truncate here
+                            'message': 'Command still running. Use /cmd with "input_str" to view more output or send input.'
+                        }
+                else:
+                    # This is a regular command request
+                    cmd = data.get("cmd", "")
+                    if not cmd:
+                        raise ValueError("Missing required parameter: cmd")
+                        
+                    # shell.execute now returns a JSON string
+                    json_response_str = shell.execute(cmd)
+                    response_data = json.loads(json_response_str)
+    
+                    # Truncate the 'output' field if it exists
+                    if 'output' in response_data:
+                        response_data['output'] = self._truncate_response(response_data['output'])
+                
+                # Re-serialize the potentially modified data
+                response = json.dumps(response_data)
 
                 self.send_response(200)
-                self.send_header("Content-type", "text/plain")
+                self.send_header("Content-type", "application/json")
                 self.end_headers()
                 self.wfile.write(response.encode())
             except Exception as e:
+                print(f"[Error] /cmd failed: {str(e)}")
+                import traceback
+                print(f"[Error] Traceback: {traceback.format_exc()}")
                 self.send_response(500)
-                self.send_header("Content-type", "text/plain")
+                self.send_header("Content-type", "application/json")
                 self.end_headers()
-                self.wfile.write(str(e).encode())
+                error_response = json.dumps({'status': 'error', 'message': str(e)})
+                self.wfile.write(error_response.encode())
+
         elif self.path == "/write_file":
             content_length = int(self.headers["Content-Length"])
             post_data = self.rfile.read(content_length)
@@ -639,6 +917,7 @@ def signal_handler(signum, frame):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Start shell server')
+    parser.add_argument('--port', type=int, default=6666, help='Port to run the server on')
     parser.add_argument('--secure', action='store_true', help='Enable secure mode with command confirmation')
     args = parser.parse_args()
     
@@ -646,7 +925,7 @@ if __name__ == "__main__":
     ShellHandler.secure_mode = args.secure
     
     if args.secure:
-        print("Starting server in SECURE MODE - commands will require confirmation")
+        print(f'{COLOR_RED}Starting server in SECURE MODE - commands will require confirmation{COLOR_RESET}')
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -661,9 +940,9 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
 
-    server_address = ("", 6666)
+    server_address = ("", args.port)
     httpd = HTTPServer(server_address, ShellHandler)
-    print("Starting server on port 6666...")
+    print(f"Starting server on port {args.port}...")
 
     try:
         httpd.serve_forever()
