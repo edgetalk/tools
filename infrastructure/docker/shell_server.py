@@ -202,7 +202,23 @@ class Shell:
 
         # --- Interaction Handling: Check for and clear pending interactive command ---
         if self.pending_interactive_context:
-            print(f"[Info] New command received while interactive command (PID: {self.pid}) was pending. Cancelling previous command.")
+            print(f"[Info] New command received while interactive command (PID: {self.pid}) was pending.")
+            
+            # In secure mode, confirm cancellation of previous command
+            if self.secure_mode:
+                print(f'{COLOR_RED}[Secure Mode] Cancel previous interactive command and run: {cmd}{COLOR_RESET}')
+                print(f'{COLOR_RED}[Secure Mode] Press ENTER to continue or ESC to abort{COLOR_RESET}')
+                
+                key = read_single_keypress()
+                if key == '\x1b':  # ESC key
+                    print(f'{COLOR_RED}[Secure Mode] Command aborted by user{COLOR_RESET}')
+                    # Return JSON error for consistency
+                    return json.dumps({'status': 'error', 'message': 'New command aborted by user in secure mode, previous interactive command still running'})
+                elif key != '\r':  # Not ENTER key
+                    print(f'{COLOR_RED}[Secure Mode] Invalid key. Command aborted{COLOR_RESET}')
+                    return json.dumps({'status': 'error', 'message': 'Command aborted: Invalid key press in secure mode, previous interactive command still running'})
+            
+            print(f"[Info] Cancelling previous command.")
             # We don't kill the process as it's the same shell process
             # Just clear the pending state
             self.pending_interactive_context = None
