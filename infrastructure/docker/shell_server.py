@@ -483,6 +483,29 @@ class ShellHandler(BaseHTTPRequestHandler):
                     if not shell.pending_interactive_context:
                         raise ValueError("No interactive command pending")
     
+                    # Check if we need confirmation in secure mode
+                    if self.secure_mode:
+                        print(f'{COLOR_RED}[Secure Mode] Send input to interactive process: {input_str[:50]}...{COLOR_RESET}')
+                        print(f'{COLOR_RED}[Secure Mode] Press ENTER to continue or ESC to abort{COLOR_RESET}')
+                        
+                        key = read_single_keypress()
+                        if key == '\x1b':  # ESC key
+                            print(f'{COLOR_RED}[Secure Mode] Input aborted by user{COLOR_RESET}')
+                            self.send_response(403)
+                            self.send_header("Content-type", "application/json")
+                            self.end_headers()
+                            error_response = json.dumps({'status': 'error', 'message': 'Input aborted by user in secure mode'})
+                            self.wfile.write(error_response.encode())
+                            return
+                        elif key != '\r':  # Not ENTER key
+                            print(f'{COLOR_RED}[Secure Mode] Invalid key. Input aborted{COLOR_RESET}')
+                            self.send_response(403)
+                            self.send_header("Content-type", "application/json")
+                            self.end_headers()
+                            error_response = json.dumps({'status': 'error', 'message': 'Input aborted: Invalid key press in secure mode'})
+                            self.wfile.write(error_response.encode())
+                            return
+
                     # Send input if provided
                     if input_str:
                         print(f"[Debug] Sending input to interactive command: {input_str[:50]}...")
