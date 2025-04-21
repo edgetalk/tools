@@ -67,11 +67,13 @@ class Shell:
                     term_size = struct.pack("HHHH", 24, 80, 0, 0)
                     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, term_size)
 
-                    env = {
+                    # Start with parent process environment
+                    env = os.environ.copy()
+                    
+                    # Override specific environment variables for non-interactive behavior
+                    env.update({
                         "TERM": "xterm",
-                        "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
                         "PS1": "$ ",
-                        "LANG": "en_US.UTF-8",
                         # Prevent paging in various tools
                         "PAGER": "cat",
                         "GIT_PAGER": "cat",
@@ -81,7 +83,7 @@ class Shell:
                         "GIT_CONFIG_PARAMETERS": "'core.pager=cat' 'color.ui=never'",
                         # No fancy prompts
                         "PROMPT_COMMAND": "",
-                    }
+                    })
                     os.execvpe("/bin/bash", ["/bin/bash", "--login"], env)
                 except Exception as e:
                     print(f"[Error] Child process setup failed: {str(e)}")
