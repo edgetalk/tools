@@ -752,9 +752,9 @@ class ShellHandler(BaseHTTPRequestHandler):
                     if view_range[0] < 1:
                         raise ValueError("view_range start line must be >= 1")
 
-                    # Validate end line is >= start line
-                    if view_range[1] < view_range[0]:
-                        raise ValueError("view_range end line must be >= start line")
+                    # Validate end line is >= start line or -1 (indicating end of file)
+                    if view_range[1] != -1 and view_range[1] < view_range[0]:
+                        raise ValueError("view_range end line must be >= start line or -1 for end of file")
 
                 with open(abs_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -762,7 +762,8 @@ class ShellHandler(BaseHTTPRequestHandler):
                 if view_range:
                     lines = content.splitlines()
                     start = max(0, view_range[0] - 1)  # Convert to 0-based index
-                    end = min(len(lines), view_range[1])
+                    # When end is -1, show all lines from start to the end of file
+                    end = len(lines) if view_range[1] == -1 else min(len(lines), view_range[1])
                     content = "\n".join(lines[start:end])
 
                 # Add line numbers

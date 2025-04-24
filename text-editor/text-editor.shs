@@ -34,7 +34,7 @@ STR_REPLACE (Preferred) REQUIREMENTS:
 
 STRUCTURED INSERT (Alternative):
 - Line-numbers from view
-- For XML/JSON/PLIST
+- Use insert command with new_str and insert_line parameters
 
 CRITICAL WARNINGS:
 ! Fails on multi-matches
