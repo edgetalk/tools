@@ -69,7 +69,7 @@ NEVER:
           type: "string"
         }
         insert_line: {
-          description: "Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`."
+          description: "Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. CANNOT use with `str_replace` command."
           type: "integer"
         }
         new_str: {
