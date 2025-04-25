@@ -40,7 +40,7 @@ RUN apt-get update && \
     && apt-get clean
 
 # just a way to invalidate the cache
-RUN echo "3"
+RUN echo "4"
 
 # Optional Shards build process
 RUN if [ "$BUILD_SHARDS" = "true" ] ; then \
