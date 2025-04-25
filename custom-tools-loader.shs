@@ -1,0 +1,16 @@
+@wire(add-tool {
+  = code
+  Shards.Read | Shards.Distill("new-tool") = new-tool
+  WireRunner(new-tool) | ExpectTable = tool-table
+  
+  tool-table:use | ExpectWire ; just to assert it's a wire
+  tool-table:definition | ExpectTable | Take("name") | ExpectString = tool-name
+  
+  [tool-name code] | DB.Query("INSERT OR REPLACE INTO custom_tools (name, code) VALUES (?, ?)")
+})
+
+@read("youtube-captions/youtube-captions.shs") | Do(add-tool)
+@read("text-editor/text-editor.shs") | Do(add-tool)
+@read("shell-cmd/shell-cmd.shs") | Do(add-tool)
+@read("search-emails/search-emails.shs") | Do(add-tool)
+@read("roll-dice/roll-dice.shs") | Do(add-tool)
