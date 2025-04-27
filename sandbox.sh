@@ -12,8 +12,6 @@ if [ "$platform" = "Darwin" ]; then
 ;; Deny all file write operations by default
 (deny file-write*)
 
-;; Allow write access and directory operations for ~/devel/tmp and the backup directory
-(allow file-write* (regex #"^${HOME}/devel/tmp(/|$)"))
 ;; Allow write access to the current directory and all its subdirectories
 (allow file-write* (regex #"^$(pwd)(/|$)"))
 (allow file-write* (regex #"^$(pwd)/.edits_backup(/|$)"))
@@ -42,7 +40,6 @@ elif [ "$platform" = "Linux" ]; then
     # Linux - use firejail
     firejail --noprofile \
          --read-only=/ \
-         --read-write="${HOME}/devel/tmp" \
          --read-write="$(pwd)" \
          --read-write="$(pwd)/.edits_backup" \
          --read-write=/dev \
