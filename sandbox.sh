@@ -1,6 +1,11 @@
 #!/bin/bash
 
-cat > config.sb << EOF
+# Detect platform
+platform=$(uname -s)
+
+if [ "$platform" = "Darwin" ]; then
+    # macOS - use sandbox-exec
+    cat > config.sb << EOF
 (version 1)
 (allow default)
 
@@ -30,6 +35,23 @@ cat > config.sb << EOF
     (regex #"^/var/folders/_0/.*T/rust.*"))
 EOF
 
-sandbox-exec -f config.sb "$@"
+    sandbox-exec -f config.sb "$@"
+    rm -f config.sb
 
-rm -f config.sb
+elif [ "$platform" = "Linux" ]; then
+    # Linux - use firejail
+    firejail --noprofile \
+         --read-only=/ \
+         --read-write="${HOME}/devel/tmp" \
+         --read-write="$(pwd)" \
+         --read-write="$(pwd)/.edits_backup" \
+         --read-write=/dev \
+         --read-write=/tmp \
+         --read-write=/var/tmp \
+         --whitelist=/var/folders \
+         --seccomp \
+         "$@"
+else
+    echo "Unsupported platform: $platform"
+    exit 1
+fi
