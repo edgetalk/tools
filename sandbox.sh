@@ -5,6 +5,10 @@ platform=$(uname -s)
 
 if [ "$platform" = "Darwin" ]; then
     # macOS - use sandbox-exec
+    
+    # Capture TMPDIR value for sandbox config
+    TMPDIR=${TMPDIR:-/var/folders}
+    
     cat > config.sb << EOF
 (version 1)
 (allow default)
@@ -23,14 +27,14 @@ if [ "$platform" = "Darwin" ]; then
 (allow file-write* (regex #"^/dev/ttys(/|$)"))
 
 ;; Allow write access to temporary locations that many programs require
-(allow file-write*
-    (literal "/dev/null")
-    (literal "/dev/dtracehelper")
-    (regex #"^/dev/tty")
-    (regex #"^/private/var/tmp(/|$)")
-    (regex #"^/var/folders/.*")
-    (regex #"^/var/folders/_0/.*(/|$)")
-    (regex #"^/var/folders/_0/.*T/rust.*"))
+(allow file-write* (literal "/dev/null"))
+(allow file-write* (literal "/dev/dtracehelper"))
+(allow file-write* (regex #"^/dev/tty"))
+(allow file-write* (subpath "/private/var/tmp"))
+(allow file-write* (subpath "/private/tmp"))
+(allow file-write* (subpath "/tmp"))
+(allow file-write* (subpath "/private/var/folders"))
+(allow file-write* (subpath "/var/folders"))
 EOF
 
     sandbox-exec -f config.sb "$@"
@@ -38,6 +42,10 @@ EOF
 
 elif [ "$platform" = "Linux" ]; then
     # Linux - use firejail
+    
+    # Capture TMPDIR value for firejail config
+    TMPDIR=${TMPDIR:-/tmp}
+    
     firejail --noprofile \
          --read-only=/ \
          --read-write="$(pwd)" \
@@ -45,7 +53,7 @@ elif [ "$platform" = "Linux" ]; then
          --read-write=/dev \
          --read-write=/tmp \
          --read-write=/var/tmp \
-         --whitelist=/var/folders \
+         --read-write="$TMPDIR" \
          --seccomp \
          "$@"
 else
