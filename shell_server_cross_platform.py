@@ -1112,27 +1112,37 @@ class ShellHandler(BaseHTTPRequestHandler):
                 f.writelines(lines)
 
             return "Text inserted successfully"
-        elif command == "undo_edit":
-            if not os.path.exists(abs_path):
-                raise FileNotFoundError(f"File not found: {path}")
+        elif command == "replace_first":
+            old_str = data.get("old_str")
+            new_str = data.get("new_str", "")
+            if not old_str:
+                raise ValueError(
+                    "old_str parameter is required for replace_first command"
+                )
 
             # Check if we need confirmation in secure mode
-            if not self.confirm_destructive_operation(f"Undo edit to file: {abs_path}"):
+            if not self.confirm_destructive_operation(f"Replace first occurrence in file: {abs_path}"):
                 return "Operation aborted by user"
 
-            backup_path = self._get_backup_path(abs_path)
-            if not os.path.exists(backup_path):
-                raise ValueError("No previous version available to undo")
+            # Create backup before modification
+            self._create_backup(abs_path)
 
-            # Restore the backup
-            with open(backup_path, "r", encoding="utf-8") as src:
-                with open(abs_path, "w", encoding="utf-8") as dst:
-                    dst.write(src.read())
+            with open(abs_path, "r", encoding="utf-8") as f:
+                content = f.read()
 
-            # Remove the backup after restoring
-            os.remove(backup_path)
+            # Count occurrences for informational purposes
+            match_count = content.count(old_str)
 
-            return "Successfully reverted to previous version"
+            if match_count == 0:
+                raise ValueError("old_str not found in the file")
+
+            # Replace only the first occurrence
+            new_content = content.replace(old_str, new_str, 1)
+
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+            return f"First occurrence replaced successfully. {match_count} total matches found."
         else:
             raise ValueError(f"Invalid command: {command}")
 

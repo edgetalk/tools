@@ -18,9 +18,9 @@
 
 KEY FEATURES:
 - view: line-numbered file contents OR dirs (output similar to ls command)
-- undo_edit per file, clipped outputs
+- Multiple replacement strategies for different needs
 
-STR_REPLACE (Preferred) REQUIREMENTS:
+STR_REPLACE (Strict) REQUIREMENTS:
 1. UNIQUE CONTEXT (PER CALL):
    - 5+ lines EXACT before/after context
    - Full whitespace/indentation
@@ -32,19 +32,24 @@ STR_REPLACE (Preferred) REQUIREMENTS:
    - view to count matches
    - Capture unique context per instance
 
+REPLACE_FIRST (Flexible) BEHAVIOR:
+- Replaces only the first occurrence of the string
+- Returns information about how many matches were found
+- Useful for iterative replacements or when uniqueness is uncertain
+
 STRUCTURED INSERT (Alternative):
 - Line-numbers from view
 - Use insert command with new_str and insert_line parameters
 
 CRITICAL WARNINGS:
-! Fails on multi-matches
-! Fails on whitespace mismatch
+! str_replace fails on multi-matches
+! All commands fail on whitespace mismatch
 ! Wrong context=wrong edit
 
 BEST PRACTICES:
 - Group file edits in single message
-- Multiple str_replace calls OK
-- Atomic undo history preserved
+- Multiple replacement calls OK
+- Use replace_first when uncertain about uniqueness
 
 SAFETY PROTOCOLS:
 ALWAYS:
@@ -60,8 +65,8 @@ NEVER:
       type: "object"
       properties: {
         command: {
-          description: "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`, `undo_edit`."
-          enum: ["view" "create" "str_replace" "insert" "undo_edit"]
+          description: "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `replace_first`, `insert`."
+          enum: ["view" "create" "str_replace" "replace_first" "insert"]
           type: "string"
         }
         file_text: {
@@ -69,15 +74,15 @@ NEVER:
           type: "string"
         }
         insert_line: {
-          description: "Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. CANNOT use with `str_replace` command."
+          description: "Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. CANNOT use with `str_replace` or `replace_first` commands."
           type: "integer"
         }
         new_str: {
-          description: "Optional parameter of `str_replace` command containing the new string (if not given, no string will be added). Required parameter of `insert` command containing the string to insert."
+          description: "Optional parameter of `str_replace` and `replace_first` commands containing the new string (if not given, no string will be added). Required parameter of `insert` command containing the string to insert."
           type: "string"
         }
         old_str: {
-          description: "Required parameter of `str_replace` command containing the string in `path` to replace. Must match exactly one location in the file."
+          description: "Required parameter of `str_replace` and `replace_first` commands containing the string in `path` to replace. For `str_replace`, must match exactly one location in the file."
           type: "string"
         }
         path: {
