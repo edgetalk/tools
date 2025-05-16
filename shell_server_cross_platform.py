@@ -70,7 +70,8 @@ class BaseShell:
     def _strip_control_sequences(self, text):
         """Strip common terminal control sequences from the output"""
         # Pattern to match common terminal control sequences
-        # This includes color codes, cursor movement, and other control characters       control_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][0-9;]*[a-zA-Z]|\r|\x1b\(B')
+        # This includes color codes, cursor movement, and other control characters
+        control_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][0-9;]*[a-zA-Z]|\r|\x1b\(B')
         # Remove the control sequences
         return control_pattern.sub('', text)
 
