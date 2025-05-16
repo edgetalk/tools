@@ -19,6 +19,8 @@ COLOR_RESET = '\033[0m'
 
 # Add a regex pattern to detect shell prompts
 PROMPT_PATTERN = re.compile(r'[^>\n]*[$#>]\s*$')
+# Add Windows-specific prompt pattern that better matches cmd.exe prompts like "C:\path>"
+WINDOWS_PROMPT_PATTERN = re.compile(r'[A-Za-z]:\\.*>(\s*)$')
 
 # Determine the operating system
 IS_WINDOWS = platform.system() == 'Windows'
@@ -77,7 +79,10 @@ class BaseShell:
 
     def _is_prompt(self, text):
         """Check if the text ends with a shell prompt"""
-        return bool(PROMPT_PATTERN.search(text.rstrip()))
+        if IS_WINDOWS:
+            return bool(WINDOWS_PROMPT_PATTERN.search(text.rstrip())) or bool(PROMPT_PATTERN.search(text.rstrip()))
+        else:
+            return bool(PROMPT_PATTERN.search(text.rstrip()))
 
 
 class UnixShell(BaseShell):
@@ -86,6 +91,7 @@ class UnixShell(BaseShell):
         super().__init__(secure_mode)
         self.master_fd = None
         self.pid = None
+        self.marker_prefix = "UNIX_MARKER_"  # Prefix for command completion markers
         
         try:
             self.master_fd, slave_fd = pty.openpty()
@@ -274,6 +280,10 @@ class UnixShell(BaseShell):
             print(f"[Debug] Modified command for non-interactive mode: {cmd}")
 
         print(f"[Debug] Executing command: {cmd}")
+        
+        # Generate a unique marker for this command
+        marker_id = f"{self.marker_prefix}{time.time()}"
+        
         try:
             os.write(self.master_fd, (cmd + "\n").encode())
         except OSError as e:
@@ -303,17 +313,20 @@ class UnixShell(BaseShell):
                         prompt_detected = True
                         print(f"[Debug] Prompt detected: {current_output[-30:].strip()}")
                         break
-                elif i > 5:  # Require at least a few checks before declaring timeout
-                    # Check if process is still running before declaring timeout
+                elif i > 15:  # No new output for 1.5+ seconds
+                    # Check if process is still running
                     try:
                         pid, status = os.waitpid(self.pid, os.WNOHANG)
-                        if pid == 0:  # Process is still running, likely waiting
+                        if pid == 0:  # Process is still running
+                            # Simply conclude it's waiting for input if it's been quiet for a while
+                            # but the process is still running - this avoids terminating an interactive process
+                            print(f"[Debug] No output for 1.5+ seconds but process is still running, assuming interactive")
                             timed_out_waiting = True
                             break
                         else:  # Process ended without prompt
                             command_completed = True
                             break
-                    except OSError:  # Process already reaped or invalid
+                    except OSError:  # Process error
                         command_completed = True
                         break
             except Exception as e:
@@ -402,6 +415,7 @@ class WindowsShell(BaseShell):
         self.output_lock = threading.Lock()
         self.process_lock = threading.Lock()
         self.process_running = False
+        self.marker_prefix = "CMD_MARKER_"  # Prefix for command completion markers
         
         try:
             # Start cmd.exe process
@@ -538,6 +552,9 @@ class WindowsShell(BaseShell):
             # Clear any pending output
             self._clear_output_buffer()
             
+            # Generate a unique marker for this command
+            marker_id = f"{self.marker_prefix}{time.time()}"
+            
             try:
                 # Send the command
                 self.process.stdin.write(f"{cmd}\n")
@@ -551,44 +568,52 @@ class WindowsShell(BaseShell):
                 self.process.stdin.write(f"{cmd}\n")
                 self.process.stdin.flush()
 
-        # Wait for command to produce output
+        # Wait for initial output
         time.sleep(0.5)
-        
-        # Check if we need to wait longer for output
         output = self._clear_output_buffer()
-        if not output.strip() or cmd in output:
-            # Command might be running or waiting for input
-            # Wait a bit longer to see if it completes
-            for i in range(25):  # Wait up to 2.5 seconds more
+        
+        # Try to detect if command has completed by checking for prompt
+        prompt_detected = self._is_prompt(output)
+        
+        # If no prompt detected, wait longer for more output
+        if not prompt_detected:
+            # Wait up to 3 seconds (30 * 0.1) for more output
+            for i in range(30):
                 time.sleep(0.1)
                 new_output = self._clear_output_buffer()
-                output += new_output
-                
-                # Check if we have a prompt in the output
-                if self._is_prompt(output):
+                if new_output:
+                    output += new_output
+                    # Check if we got a prompt now
+                    if self._is_prompt(output):
+                        prompt_detected = True
+                        break
+                elif i >= 15:  # No output for 1.5+ seconds
+                    # If the process is running but no output for a while,
+                    # it's likely waiting for interactive input
+                    print(f"[Debug] No output for 1.5+ seconds, assuming interactive command")
                     break
-                    
-                # If no new output and we've waited at least 1 second, assume interactive
-                if not new_output and i >= 10:
-                    # Command might be waiting for input
-                    self.pending_interactive_context = {'cmd': cmd}
-                    
-                    # Clean the output
-                    lines = output.splitlines()
-                    # Remove command echo if present
-                    if lines and cmd in lines[0]:
-                        lines = lines[1:]
-                    cleaned_output = "\n".join(line for line in lines if line.strip())
-                    
-                    # Return JSON response for interaction
-                    response_data = {
-                        'status': 'requires_interaction',
-                        'output': self._strip_control_sequences(cleaned_output),
-                        'message': 'Command is waiting. Use /cmd with "input_str" to view output or send input. Use /cmd with a new "cmd" to cancel and run a new command.'
-                    }
-                    return json.dumps(response_data)
         
-        # If we got here, the command either completed or returned to prompt quickly
+        # If we still don't have a prompt, the command is likely interactive
+        if not prompt_detected:
+            # Command is likely waiting for input
+            self.pending_interactive_context = {'cmd': cmd}
+            
+            # Clean the output
+            lines = output.splitlines()
+            # Remove command echo if present
+            if lines and cmd in lines[0]:
+                lines = lines[1:]
+            cleaned_output = "\n".join(line for line in lines if line.strip())
+            
+            # Return JSON response for interaction
+            response_data = {
+                'status': 'requires_interaction',
+                'output': self._strip_control_sequences(cleaned_output),
+                'message': 'Command is waiting. Use /cmd with "input_str" to view output or send input. Use /cmd with a new "cmd" to cancel and run a new command.'
+            }
+            return json.dumps(response_data)
+        
+        # If we got here, the command either completed or returned to prompt
         self.pending_interactive_context = None  # Ensure no pending state
         
         # Update CWD after command execution
