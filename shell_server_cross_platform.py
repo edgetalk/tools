@@ -726,16 +726,17 @@ class ShellHandler(BaseHTTPRequestHandler):
     def is_git_repo(cls, path):
         """Check if a path is inside a git repository"""
         try:
-            # Get the shell to run git command
-            shell = cls.get_shell()
-            
-            # Go to the directory and check if it's a git repo
-            cmd = f"cd {shlex.quote(os.path.dirname(path))} && git rev-parse --is-inside-work-tree"
-            result_json = shell.execute(cmd)
-            result = json.loads(result_json)
-            
-            # If the command output contains "true", it's a git repo
-            return result.get("status") == "completed" and "true" in result.get("output", "")
+            # Direct subprocess call to check if git repo
+            dir_path = os.path.dirname(path) if os.path.isfile(path) else path
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=dir_path,
+                text=True,
+                timeout=1  # Short timeout to avoid hanging
+            )
+            return result.returncode == 0 and "true" in result.stdout
         except Exception as e:
             print(f"[Warning] Failed to check if path is in git repo: {str(e)}")
             return False
@@ -744,26 +745,39 @@ class ShellHandler(BaseHTTPRequestHandler):
     def git_commit_file(cls, file_path, operation_type):
         """Commit a file to git after it has been modified"""
         try:
-            # Get the shell to run git commands
-            shell = cls.get_shell()
-            
-            # Prepare the directory and file paths
             dir_path = os.path.dirname(file_path)
             file_name = os.path.basename(file_path)
-            
-            # Create commit message
             commit_message = f"{operation_type} file {file_name}"
             
-            # Run git commands
-            cmd = f"cd {shlex.quote(dir_path)} && git add {shlex.quote(file_name)} && git commit -m {shlex.quote(commit_message)}"
-            result_json = shell.execute(cmd)
-            result = json.loads(result_json)
+            # Add file to git staging
+            add_result = subprocess.run(
+                ["git", "add", file_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=dir_path,
+                text=True,
+                timeout=2
+            )
             
-            if result.get("status") == "completed":
+            if add_result.returncode != 0:
+                print(f"[Warning] Git add failed: {add_result.stderr}")
+                return False
+                
+            # Commit file
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=dir_path,
+                text=True,
+                timeout=3
+            )
+            
+            if commit_result.returncode == 0:
                 print(f"[Info] Git commit successful: {commit_message}")
                 return True
             else:
-                print(f"[Warning] Git commit failed: {result.get('output', 'Unknown error')}")
+                print(f"[Warning] Git commit failed: {commit_result.stderr}")
                 return False
         except Exception as e:
             print(f"[Warning] Failed to commit file to git: {str(e)}")
