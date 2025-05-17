@@ -723,6 +723,53 @@ class ShellHandler(BaseHTTPRequestHandler):
         return True  # Always allow in non-secure mode
 
     @classmethod
+    def is_git_repo(cls, path):
+        """Check if a path is inside a git repository"""
+        try:
+            # Get the shell to run git command
+            shell = cls.get_shell()
+            
+            # Go to the directory and check if it's a git repo
+            cmd = f"cd {shlex.quote(os.path.dirname(path))} && git rev-parse --is-inside-work-tree"
+            result_json = shell.execute(cmd)
+            result = json.loads(result_json)
+            
+            # If the command output contains "true", it's a git repo
+            return result.get("status") == "completed" and "true" in result.get("output", "")
+        except Exception as e:
+            print(f"[Warning] Failed to check if path is in git repo: {str(e)}")
+            return False
+
+    @classmethod
+    def git_commit_file(cls, file_path, operation_type):
+        """Commit a file to git after it has been modified"""
+        try:
+            # Get the shell to run git commands
+            shell = cls.get_shell()
+            
+            # Prepare the directory and file paths
+            dir_path = os.path.dirname(file_path)
+            file_name = os.path.basename(file_path)
+            
+            # Create commit message
+            commit_message = f"{operation_type} file {file_name}"
+            
+            # Run git commands
+            cmd = f"cd {shlex.quote(dir_path)} && git add {shlex.quote(file_name)} && git commit -m {shlex.quote(commit_message)}"
+            result_json = shell.execute(cmd)
+            result = json.loads(result_json)
+            
+            if result.get("status") == "completed":
+                print(f"[Info] Git commit successful: {commit_message}")
+                return True
+            else:
+                print(f"[Warning] Git commit failed: {result.get('output', 'Unknown error')}")
+                return False
+        except Exception as e:
+            print(f"[Warning] Failed to commit file to git: {str(e)}")
+            return False
+
+    @classmethod
     def cleanup_backups(cls):
         """Clean up all backup files"""
         backup_path = os.path.join(os.getcwd(), cls.backup_dir)
@@ -958,6 +1005,11 @@ class ShellHandler(BaseHTTPRequestHandler):
                 )
                 if os.path.exists(abs_filepath):
                     print(f"[Debug] File size: {os.path.getsize(abs_filepath)} bytes")
+                    
+                    # Check if file is in a git repo and commit if it is
+                    if self.is_git_repo(abs_filepath):
+                        print(f"[Info] File is in a git repo, committing changes")
+                        self.git_commit_file(abs_filepath, "Writing")
 
                 self.send_response(200)
                 self.send_header("Content-type", "text/plain")
@@ -1079,6 +1131,11 @@ class ShellHandler(BaseHTTPRequestHandler):
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(file_text)
+                
+            # Check if file is in a git repo and commit if it is
+            if self.is_git_repo(abs_path):
+                print(f"[Info] File is in a git repo, committing changes")
+                self.git_commit_file(abs_path, "Creating")
 
             return "File created successfully"
         elif command == "str_replace":
@@ -1108,6 +1165,11 @@ class ShellHandler(BaseHTTPRequestHandler):
 
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
+                
+            # Check if file is in a git repo and commit if it is
+            if self.is_git_repo(abs_path):
+                print(f"[Info] File is in a git repo, committing changes")
+                self.git_commit_file(abs_path, "Editing")
 
             return "String replaced successfully"
         elif command == "insert":
@@ -1135,6 +1197,11 @@ class ShellHandler(BaseHTTPRequestHandler):
 
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)
+                
+            # Check if file is in a git repo and commit if it is
+            if self.is_git_repo(abs_path):
+                print(f"[Info] File is in a git repo, committing changes")
+                self.git_commit_file(abs_path, "Inserting into")
 
             return "Text inserted successfully"
         elif command == "replace_first":
@@ -1166,6 +1233,11 @@ class ShellHandler(BaseHTTPRequestHandler):
 
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
+                
+            # Check if file is in a git repo and commit if it is
+            if self.is_git_repo(abs_path):
+                print(f"[Info] File is in a git repo, committing changes")
+                self.git_commit_file(abs_path, "Editing")
 
             return f"First occurrence replaced successfully. {match_count} total matches found."
         else:
