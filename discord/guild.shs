@@ -1,0 +1,73 @@
+@define(discord-epoch-time 1420070400000)
+
+@wire(discord-guild {
+  ExpectTable = input-table
+  ; input will be a table, so we take the columns we need
+  ; in this case, we need the columns we need
+  input-table:operation | ExpectString = operation
+  input-table:guild_id | ExpectString = guild-id
+  
+  env:discord-token | ExpectString = discord-token
+  
+  "" >= output-string
+  
+  operation | Match([
+    "change_self_nickname" {
+      ["https://discord.com/api/v10/guilds/" guild-id "/members/@me"] | String.Join = url
+      
+      {
+        "nick": (input-table:nickname | ExpectString)
+      } | ToJson | Http.Patch(url
+        Headers: ({
+            "Authorization": (["Bot " discord-token] | String.Join)
+            "User-Agent": "DiscordBot (https://edgetalk.ai, 0.0.1)"
+            "Content-Type": "application/json"
+          }
+        )
+        Timeout: 30
+      ) | Await(FromJson) | ToString > output-string
+    }
+  ])
+  
+  output-string
+})
+
+{
+  definition: {
+    name: "discord_guild"
+    description: "Do various operations on a Discord guild. Includes changing the bot's nickname."
+    parameters: {
+      type: "object"
+      properties: {
+        operation: {
+          type: "string"
+          description: "The operation to perform. e.g. 'change_self_nickname'."
+        }
+        guild_id: {
+          type: "string"
+          description: "The ID of the guild to change the nickname of the bot for."
+        }
+        nickname: {
+          type: "string"
+          description: "The nickname to change the bot's nickname to. ONLY USED FOR THE 'change_self_nickname' OPERATION."
+        }
+      }
+      required: ["operation" "guild_id"]
+    }
+  }
+  
+  use: discord-guild
+}
+
+; ; Test code
+; {
+;   discord-token: (@env("DISCORD_TOKEN"))
+; } = env
+
+; @env("DISCORD_GUILD_ID") | ExpectString = discord-guild-id
+
+; {
+;   operation: "change_self_nickname"
+;   guild_id: discord-guild-id
+;   nickname: "Johnny"
+; } | Do(discord-guild) | Log

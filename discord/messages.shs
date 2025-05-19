@@ -80,7 +80,7 @@
 {
   definition: {
     name: "discord_messages"
-    description: "Get or send messages to a Discord channel."
+    description: "Get or send messages to a Discord channel. Messages are returned from the most recent to the oldest."
     parameters: {
       type: "object"
       properties: {
@@ -116,18 +116,18 @@
   use: discord-messages
 }
 
-; Test code
-{
-  discord-token: (@env("DISCORD_TOKEN"))
-} = env
+; ; Test code
+; {
+;   discord-token: (@env("DISCORD_TOKEN"))
+; } = env
 
-@env("DISCORD_CHANNEL_ID") | ExpectString = discord-channel-id
+; @env("DISCORD_CHANNEL_ID") | ExpectString = discord-channel-id
 
-{
-  operation: "get_messages"
-  channel_id: discord-channel-id
-  limit: 10
-} | Do(discord-messages) | Log
+; {
+;   operation: "get_messages"
+;   channel_id: discord-channel-id
+;   limit: 10
+; } | Do(discord-messages) | Log
 
 ; {
 ;   operation: "send_message"
