@@ -1,0 +1,136 @@
+@define(discord-epoch-time 1420070400000)
+
+@wire(discord-messages {
+  ExpectTable = input-table
+  ; input will be a table, so we take the columns we need
+  ; in this case, we need the columns we need
+  input-table:operation | ExpectString = operation
+  input-table:channel_id | ExpectString = channel-id
+  
+  env:discord-token | ExpectString = discord-token
+  
+  "" >= output-string
+  
+  operation | Match([
+    "get_messages" {
+      ["https://discord.com/api/v10/channels/" channel-id "/messages"] | String.Join = url
+      
+      Table(params)
+      input-table:limit | When(IsInt {
+        ExpectInt | ToString | Set(params "limit")
+      })
+      input-table:after | When(IsString {
+        ExpectString | Set(params "after")
+      })
+      input-table:before | When(IsString {
+        ExpectString | Set(params "before")
+      })
+      
+      params | Http.Get(url
+        Headers: ({
+            "Authorization": (["Bot " discord-token] | String.Join)
+            "User-Agent": "DiscordBot (https://edgetalk.ai, 0.0.1)"
+            "Content-Type": "application/json"
+          }
+        )
+        Timeout: 30
+      ) | Await(FromJson) | ExpectSeq
+      ForEach({
+        ExpectTable = message
+        
+        "[" | AppendTo(output-string)
+        2 | Pow(22) | BigInt = two-to-the-twenty-second
+        message:id | ExpectString | BigInt | BigInt.Divide(two-to-the-twenty-second)
+        BigInt.ToInt | Add(@discord-epoch-time) | Div(1000) | Date.Format("%a %b %d %Y %H:%M:%S") | AppendTo(output-string)
+        "] " | AppendTo(output-string)
+        
+        message:author | ExpectTable = author
+        author:username | ExpectString
+        AppendTo(output-string)
+        " (" | AppendTo(output-string)
+        author:id | ExpectString
+        AppendTo(output-string)
+        ")" | AppendTo(output-string)
+        ": " | AppendTo(output-string)
+        message:content | ExpectString
+        AppendTo(output-string)
+        "\n" | AppendTo(output-string)
+      })
+    }
+    "send_message" {
+      input-table:message | ExpectString = message
+      ["https://discord.com/api/v10/channels/" channel-id "/messages"] | String.Join = url
+      {
+        "content": message
+      } | Http.Post(url
+        Headers: ({
+            "Authorization": (["Bot " discord-token] | String.Join)
+            "User-Agent": "DiscordBot (https://edgetalk.ai, 0.0.1)"
+            "Content-Type": "application/json"
+          }
+        )
+        Timeout: 30
+      ) | Await(FromJson) | Log
+    }
+  ])
+  
+  output-string
+})
+
+{
+  definition: {
+    name: "discord_messages"
+    description: "Get or send messages to a Discord channel."
+    parameters: {
+      type: "object"
+      properties: {
+        operation: {
+          type: "string"
+          description: "The operation to perform. e.g. 'get_messages', 'send_message'."
+        }
+        channel_id: {
+          type: "string"
+          description: "The ID of the channel to get messages from or send a message to."
+        }
+        message: {
+          type: "string"
+          description: "The message to send to the channel. ONLY USED FOR THE 'send_message' OPERATION."
+        }
+        limit: {
+          type: "number"
+          description: "The maximum number of messages to return. ONLY USED FOR THE 'get_messages' OPERATION."
+        }
+        after: {
+          type: "string"
+          description: "The ID of the message to start after. ONLY USED FOR THE 'get_messages' OPERATION."
+        }
+        before: {
+          type: "string"
+          description: "The ID of the message to start before. ONLY USED FOR THE 'get_messages' OPERATION."
+        }
+      }
+      required: ["operation" "channel_id"]
+    }
+  }
+  
+  use: discord-messages
+}
+
+; Test code
+{
+  discord-token: (@env("DISCORD_TOKEN"))
+} = env
+
+@env("DISCORD_CHANNEL_ID") | ExpectString = discord-channel-id
+
+{
+  operation: "get_messages"
+  channel_id: discord-channel-id
+  limit: 10
+} | Do(discord-messages) | Log
+
+; {
+;   operation: "send_message"
+;   channel_id: discord-channel-id
+;   message: "Hello, world!"
+; } | Do(discord-messages) | Log
