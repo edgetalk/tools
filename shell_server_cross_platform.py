@@ -1066,7 +1066,19 @@ class ShellHandler(BaseHTTPRequestHandler):
 
         print(f"[Debug] Text editor: {command} operation on file: {abs_path}")
 
-        if command == "view":
+        if command == "count":
+            old_str = data.get("old_str")
+            if not old_str:
+                raise ValueError("old_str parameter is required for count command")
+
+            if os.path.isfile(abs_path):
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                count = content.count(old_str)
+                return f"String '{old_str}' appears {count} times in the file"
+            else:
+                raise FileNotFoundError(f"File not found: {path}")
+        elif command == "view":
             if os.path.isfile(abs_path):
                 # Handle view_range if specified
                 view_range = data.get("view_range")

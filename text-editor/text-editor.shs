@@ -17,29 +17,26 @@
     description: """Persistent File Editor
 
 KEY FEATURES:
-- view: line-numbered file contents OR dirs (output similar to ls command)
+- View: line-numbered file contents OR dirs (output similar to ls command)
 - Multiple replacement strategies for different needs
 
 STR_REPLACE (Strict) REQUIREMENTS:
 1. UNIQUE CONTEXT (PER CALL):
-   - 5+ lines EXACT before/after context
+   - Count when in doubt to ensure unique matches
+   - 3+ lines EXACT before/after context
    - Full whitespace/indentation
-   - Exact target string match req
+   - Exact target UNIQUE string match required
+   - Trivial strings like `}` WON'T WORK as old_str, use insert instead without old_str or insert using the insert command a unique anchor string to disambiguate multiple matches
 2. SINGLE-INSTANCE ONLY:
    - One replacement per call
-   - Multiple=separate calls
+   - Multiple calls are SUPPORTED
 3. PRE-CHECKS MANDATORY:
-   - view to count matches
-   - Capture unique context per instance
-
-REPLACE_FIRST (Flexible) BEHAVIOR:
-- Replaces only the first occurrence of the string
-- Returns information about how many matches were found
-- Useful for iterative replacements or when uniqueness is uncertain
+   - Count matches
+   - Until you capture unique context per instance
 
 STRUCTURED INSERT (Alternative):
 - Line-numbers from view
-- Use insert command with new_str and insert_line parameters
+- Use insert command with new_str and insert_line parameters (and without old_str)
 
 CRITICAL WARNINGS:
 ! str_replace fails on multi-matches
@@ -54,43 +51,42 @@ BEST PRACTICES:
 SAFETY PROTOCOLS:
 ALWAYS:
 - Verify match count first
-- Capture 5+ lines before/after
+- Capture 3+ lines before/after
 - Include exact whitespace
 - One change per call
 NEVER:
 - Assume unique matches
-- Use partial context
-- Batch replace"""
+- Use partial context"""
     parameters: {
       type: "object"
       properties: {
         command: {
-          description: "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `replace_first`, `insert`."
-          enum: ["view" "create" "str_replace" "replace_first" "insert"]
+          description: "The commands to run. Allowed options are: view, count, create, str_replace, insert"
+          enum: ["view" "count" "create" "str_replace" "insert"]
           type: "string"
         }
         file_text: {
-          description: "Required parameter of `create` command, with the content of the file to be created."
+          description: "Required parameter of create command, with the content of the file to be created."
           type: "string"
         }
         insert_line: {
-          description: "Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. CANNOT use with `str_replace` or `replace_first` commands."
+          description: "Required parameter of insert command. The new_str will be inserted AFTER the line insert_line of path. CANNOT use with str_replace command"
           type: "integer"
         }
         new_str: {
-          description: "Optional parameter of `str_replace` and `replace_first` commands containing the new string (if not given, no string will be added). Required parameter of `insert` command containing the string to insert."
+          description: "Optional parameter of str_replace command containing the new string (if not given, no string will be added). Required parameter of insert command containing the string to insert."
           type: "string"
         }
         old_str: {
-          description: "Required parameter of `str_replace` and `replace_first` commands containing the string in `path` to replace. For `str_replace`, must match exactly one location in the file."
+          description: "Required parameter of str_replace command containing the string in path to replace. For str_replace, must match exactly one location in the file."
           type: "string"
         }
         path: {
-          description: "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`."
+          description: "Absolute path to file or directory, e.g. /repo/file.py or /repo"
           type: "string"
         }
         view_range: {
-          description: "Optional parameter of `view` command when `path` points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file."
+          description: "Optional parameter of view command when path points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting [start_line, -1] shows all lines from start_line to the end of the file."
           items: {"type": "integer"}
           type: "array"
         }
