@@ -1,0 +1,231 @@
+@wire(notion-pages {
+  ExpectTable = input
+  input:command | ExpectString = command
+  input:block-id | ExpectString = block-id
+  
+  env:notion-api-key | ExpectString = api-key
+  
+  "" >= output-string
+  command | Match([
+    "read" {
+      ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join = url
+      none | Http.Get(url Timeout: 30 Headers: ({
+          "Authorization": (["Bearer " api-key] | String.Join)
+          "Notion-Version": "2022-06-28"
+          "Content-Type": "application/json"
+        }
+      )) | Await(FromJson) | ExpectTable | Take("results") | ExpectSeq
+      ForEach({
+        ExpectTable = block | Log
+        ".block=" | AppendTo(output-string)
+        block:id | ExpectString | AppendTo(output-string)
+        "\n" | AppendTo(output-string)
+        block:type | ExpectString = block-type
+        Match([
+          "paragraph" {
+            block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+            ForEach({
+              ExpectTable | Take("plain_text") | ExpectString
+              AppendTo(output-string)
+            })
+          }
+          "heading_1" {
+            block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+            ForEach({
+              {"# " | AppendTo(output-string)}
+              ExpectTable | Take("plain_text") | ExpectString
+              AppendTo(output-string)
+            })
+          }
+          "heading_2" {
+            block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+            ForEach({
+              {"## " | AppendTo(output-string)}
+              ExpectTable | Take("plain_text") | ExpectString
+              AppendTo(output-string)
+            })
+          }
+          "heading_3" {
+            block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+            ForEach({
+              {"### " | AppendTo(output-string)}
+              ExpectTable | Take("plain_text") | ExpectString
+              AppendTo(output-string)
+            })
+          }
+          "heading_4" {
+            block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+            ForEach({
+              {"#### " | AppendTo(output-string)}
+              ExpectTable | Take("plain_text") | ExpectString
+              AppendTo(output-string)
+            })
+          }
+          "divider" {
+            "---" | AppendTo(output-string)
+          }
+          "bulleted_list_item" {
+            block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+            ForEach({
+              ; {"- " | AppendTo(output-string)}
+              ExpectTable | Take("plain_text") | ExpectString
+              AppendTo(output-string)
+            })
+          }
+          none {
+            block-type | Log("Falling back to text block")
+            Maybe({
+                block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
+                ForEach({
+                  ExpectTable | Take("plain_text") | ExpectString
+                  AppendTo(output-string)
+                })
+                ""
+              } {
+                block-type | Log("Ignored block")
+              }
+            )
+          }
+        ])
+        "\n" | AppendTo(output-string)
+      })
+    }
+    "append" {
+      ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join = url
+      input:content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
+          "Authorization": (["Bearer " api-key] | String.Join)
+          "Notion-Version": "2022-06-28"
+          "Content-Type": "application/json"
+        }
+      ))
+    }
+    "update" {
+      ["https://api.notion.com/v1/blocks/" block-id] | String.Join = url
+      input:content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
+          "Authorization": (["Bearer " api-key] | String.Join)
+          "Notion-Version": "2022-06-28"
+          "Content-Type": "application/json"
+        }
+      ))
+    }
+    "delete" {
+      ["https://api.notion.com/v1/blocks/" block-id] | String.Join = url
+      none | Http.Delete(url Timeout: 30 Headers: ({
+          "Authorization": (["Bearer " api-key] | String.Join)
+          "Notion-Version": "2022-06-28"
+        }
+      ))
+    }
+  ])
+  
+  output-string
+})
+
+{
+  definition: {
+    name: "notion_pages"
+    description: """Ability to read, append, update and delete Notion pages.
+
+The read command will return all the blocks of a page, as per blocks/{block_id}/children call. All blocks will be prefixed with .block=<block id>\n
+
+The append command will append a new block to the end of the page as per block-id.
+
+The update command will update A SINGLE BLOCK of a page, use the exact block-id as per read command output.
+
+The delete command will delete A SINGLE BLOCK of a page, use the exact block-id as per read command output.
+"""
+    parameters: {
+      type: "object"
+      properties: {
+        command: {
+          type: "string"
+          description: "The command to execute. Can be one of: append, read, update, delete."
+        }
+        block-id: {
+          type: "string"
+          description: "The ID of the Notion block (a page is also a block) to manipulate."
+        }
+        content: {
+          type: "string"
+          description: """The content of the block to update. Required for update or append command. This should be a JSON object as per NOTION API Documentation.
+
+Example (update):
+{
+  "to_do": {
+    "rich_text": [{ 
+      "text": { "content": "Lacinato kale" } 
+      }],
+    "checked": false
+  }
+}
+
+Example (update):
+{
+  "paragraph": {
+    "rich_text": [{
+        "text": {"content": "Lacinato kale"}
+      }]
+  }
+}
+
+Example (append):
+{
+	"children": [
+		{
+			"object": "block",
+			"type": "heading_2",
+			"heading_2": {
+				"rich_text": [{ "type": "text", "text": { "content": "Lacinato kale" } }]
+			}
+		},
+		{
+			"object": "block",
+			"type": "paragraph",
+			"paragraph": {
+				"rich_text": [
+					{
+						"type": "text",
+						"text": {
+							"content": "Lacinato kale is a variety of kale with a long tradition in Italian cuisine, especially that of Tuscany. It is also known as Tuscan kale, Italian kale, dinosaur kale, kale, flat back kale, palm tree kale, or black Tuscan palm.",
+							"link": { "url": "https://en.wikipedia.org/wiki/Lacinato_kale" }
+						}
+					}
+				]
+			}
+		}
+	]
+}
+"""
+        }
+      }
+      required: ["command" "block-id"]
+    }
+  }
+  
+  use: notion-pages
+}
+
+; ; Test code
+; {
+;   notion-api-key: @env("NOTION_API_KEY")
+; } = env | Log
+
+; {
+;   command: "read"
+;   block-id: "1f91f729bceb80c7b972f7240b428094"
+; }
+; Do(notion-pages) | Log
+
+; {
+;   command: "update"
+;   block-id: "1f91f729-bceb-808a-b271-d38e13154651"
+;   content: ({
+;       "paragraph": {
+;         "rich_text": [{
+;             "text": {"content": "Lacinato kale"}
+;           }]
+;       }
+;     } | ToJson
+;   )
+; }
+; Do(notion-pages) | Log
