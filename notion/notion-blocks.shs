@@ -1,78 +1,44 @@
 @define(process-block {
   ".block=" | AppendTo(output-string)
   block:id | ExpectString | AppendTo(output-string) = current-block-id
+  " .type=" | AppendTo(output-string)
+  block:type | ExpectString | AppendTo(output-string) = block-type
   "\n" | AppendTo(output-string)
-  block:type | ExpectString = block-type
-  Match([
-    "paragraph" {
+  
+  block-type | Cond([
+    {IsAny(["paragraph" "heading_1" "heading_2" "heading_3" "heading_4" "bulleted_list_item"])} {
       block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
       ForEach({
         ExpectTable | Take("plain_text") | ExpectString
         AppendTo(output-string)
       })
     }
-    "heading_1" {
-      block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
-      ForEach({
-        {"# " | AppendTo(output-string)}
-        ExpectTable | Take("plain_text") | ExpectString
-        AppendTo(output-string)
-      })
+    {Is("link_preview")} {
+      block | Take(block-type) | ExpectTable | Take("url") | ExpectString | AppendTo(output-string)
     }
-    "heading_2" {
-      block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
-      ForEach({
-        {"## " | AppendTo(output-string)}
-        ExpectTable | Take("plain_text") | ExpectString
-        AppendTo(output-string)
-      })
-    }
-    "heading_3" {
-      block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
-      ForEach({
-        {"### " | AppendTo(output-string)}
-        ExpectTable | Take("plain_text") | ExpectString
-        AppendTo(output-string)
-      })
-    }
-    "heading_4" {
-      block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
-      ForEach({
-        {"#### " | AppendTo(output-string)}
-        ExpectTable | Take("plain_text") | ExpectString
-        AppendTo(output-string)
-      })
-    }
-    "divider" {
+    {Is("divider")} {
       "---" | AppendTo(output-string)
     }
-    "bulleted_list_item" {
-      block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
-      ForEach({
-        ; {"- " | AppendTo(output-string)}
-        ExpectTable | Take("plain_text") | ExpectString
-        AppendTo(output-string)
-      })
-    }
-    "child_page" {
+    {Is("child_page")} {
       block:has_children | ExpectBool | When(IsTrue {
         {
           block-id: current-block-id
           api-key: api-key
+          cursor: ""
         } | Spawn(fetch-block-children) = children-result
         Wait(children-result) | ExpectString | AppendTo(output-string)
       })
     }
-    "video" {
+    {Is("video")} {
       "<video_block_unavailable />" | AppendTo(output-string)
     }
-    "image" {
+    {Is("image")} {
       "<image_block_unavailable />" | AppendTo(output-string)
     }
-    "file" {
+    {Is("file")} {
       "<file_block_unavailable />" | AppendTo(output-string)
     }
-    none {
+    {true} {
       block-type | Log("Falling back to text block")
       Maybe({
           block | Take(block-type) | ExpectTable | Take("rich_text") | ExpectSeq
@@ -82,10 +48,11 @@
           })
           ""
         } {
-          block-type | Log("Ignored block")
+          block | Log("Ignored block")
         }
       )
     }
+    ;
   ])
   "\n" | AppendTo(output-string)
 })
@@ -93,22 +60,37 @@
 @wire(fetch-block-children {
   {Take("block-id") = block-id}
   {Take("api-key") = api-key}
+  {Take("cursor") = cursor}
   
   "" >= output-string
   
-  ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join = url
+  ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join >= url
+  When({cursor | IsNot("")} {
+    "?start_cursor=" | AppendTo(url)
+    cursor | AppendTo(url)
+  })
   none | Http.Get(url Timeout: 30 Headers: ({
       "Authorization": (["Bearer " api-key] | String.Join)
       "Notion-Version": "2022-06-28"
       "Content-Type": "application/json"
     }
-  )) | Await(FromJson) | ExpectTable | Take("results") | ExpectSeq
+  )) | Await(FromJson) | ExpectTable = result
+  Take("results") | ExpectSeq
   ForEach({
     ExpectTable = block
     {
       block: block
       api-key: api-key
     } | @process-block
+  })
+
+  When({result | Take("has_more") | ExpectBool} {
+    {
+      block-id: block-id
+      api-key: api-key
+      cursor: (result | Take("next_cursor") | ExpectString)
+    } | Spawn(fetch-block-children) = children-result
+    Wait(children-result) | ExpectString | AppendTo(output-string)
   })
   
   output-string
