@@ -251,16 +251,16 @@ Example (append):
   use: notion-blocks
 }
 
-; Test code
-{
-  notion-api-key: @env("NOTION_API_KEY")
-} = env | Log
+; ; Test code
+; {
+;   notion-api-key: @env("NOTION_API_KEY")
+; } = env | Log
 
-{
-  command: "read"
-  block-id: "1f91f729bceb80c7b972f7240b428094"
-}
-Do(notion-blocks) | Log
+; {
+;   command: "read"
+;   block-id: "1f91f729bceb80c7b972f7240b428094"
+; }
+; Do(notion-blocks) | Log
 
 ; {
 ;   command: "update"
