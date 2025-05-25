@@ -83,7 +83,7 @@
       api-key: api-key
     } | @process-block
   })
-
+  
   When({result | Take("has_more") | ExpectBool} {
     {
       block-id: block-id
@@ -106,7 +106,7 @@
   "" >= output-string
   command | Match([
     "read" {
-      ["https://api.notion.com/v1/blocks/" block-id] | String.Join = url
+      ["https://api.notion.com/v1/blocks/" block-id] | String.Join >= url
       none | Http.Get(url Timeout: 30 Headers: ({
           "Authorization": (["Bearer " api-key] | String.Join)
           "Notion-Version": "2022-06-28"
@@ -119,7 +119,11 @@
       } | @process-block
     }
     "append" {
-      ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join = url
+      ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join >= url
+      When({input:after | IsString} {
+        "?after=" | AppendTo(url)
+        input:after | ExpectString | AppendTo(url)
+      })
       input:content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
           "Authorization": (["Bearer " api-key] | String.Join)
           "Notion-Version": "2022-06-28"
@@ -128,7 +132,7 @@
       ))
     }
     "update" {
-      ["https://api.notion.com/v1/blocks/" block-id] | String.Join = url
+      ["https://api.notion.com/v1/blocks/" block-id] | String.Join >= url
       input:content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
           "Authorization": (["Bearer " api-key] | String.Join)
           "Notion-Version": "2022-06-28"
@@ -137,7 +141,7 @@
       ))
     }
     "delete" {
-      ["https://api.notion.com/v1/blocks/" block-id] | String.Join = url
+      ["https://api.notion.com/v1/blocks/" block-id] | String.Join >= url
       none | Http.Delete(url Timeout: 30 Headers: ({
           "Authorization": (["Bearer " api-key] | String.Join)
           "Notion-Version": "2022-06-28"
@@ -156,7 +160,7 @@
 
 The read command will return the requested block and all its children, recursively (a page is also a block). All blocks will be prefixed with .block=<block id>\n
 
-The append command will append a new block as a child of the requested block.
+The append command will append a new block as a child of the requested block (or at end of the page), not all blocks support children, to insert in the page use the whole page as block-id and the after parameter to specify where to add the new block.
 
 The update command will update A SINGLE BLOCK, use the exact block-id as per read command output.
 
@@ -225,6 +229,10 @@ Example (append):
 }
 """
         }
+      }
+      after: {
+        type: "string"
+        description: "The ID of the block to insert the new block after. Only used for append command."
       }
       required: ["command" "block-id"]
     }

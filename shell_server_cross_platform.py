@@ -1,3 +1,43 @@
+#!/usr/bin/env python3
+"""
+Cross-platform Shell Server with Repository Mapping
+
+TREE-SITTER INSTALLATION INSTRUCTIONS:
+=======================================
+
+The repo-map functionality requires tree-sitter and language parsers.
+Install the following packages for full language support:
+
+# Core tree-sitter (required)
+pip install tree-sitter==0.24.0
+
+# Language parsers (install the ones you need)
+pip install tree-sitter-python==0.23.6      # Python support
+pip install tree-sitter-javascript==0.23.1  # JavaScript support  
+pip install tree-sitter-typescript==0.23.2  # TypeScript support
+pip install tree-sitter-cpp==0.23.4         # C++ support
+pip install tree-sitter-java==0.23.5        # Java support
+pip install tree-sitter-go==0.23.4          # Go support
+
+# For Rust and C, use compatible versions:
+pip install tree-sitter-rust==0.21.2        # Rust support (compatible version)
+pip install tree-sitter-c==0.21.3           # C support (compatible version)
+
+# Install all at once:
+pip install tree-sitter==0.24.0 tree-sitter-python==0.23.6 tree-sitter-javascript==0.23.1 tree-sitter-typescript==0.23.2 tree-sitter-cpp==0.23.4 tree-sitter-java==0.23.5 tree-sitter-go==0.23.4 tree-sitter-rust==0.21.2 tree-sitter-c==0.21.3
+
+NOTES:
+- tree-sitter is optional - the server works without it
+- repo-map command will show helpful error if tree-sitter is missing
+- Rust and C parsers use older versions due to language version compatibility
+- If you get version conflicts, create a separate conda environment
+
+CONDA ENVIRONMENT (RECOMMENDED):
+conda create -n tree-sitter python=3.12
+conda activate tree-sitter
+# Then install packages as above
+"""
+
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import os
@@ -12,6 +52,393 @@ import threading
 import platform
 import shlex
 from io import StringIO
+from pathlib import Path
+
+# Optional tree-sitter imports - gracefully handle if not available
+try:
+    import tree_sitter
+    from tree_sitter import Language, Parser
+    TREE_SITTER_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+    print("[Info] tree-sitter not available - repo-map command will be disabled")
+
+# Tree-sitter language mappings and queries
+LANGUAGE_EXTENSIONS = {
+    'python': ['.py', '.pyx', '.pyi'],
+    'javascript': ['.js', '.jsx', '.mjs'],
+    'typescript': ['.ts', '.tsx'],
+    'rust': ['.rs'],
+    'cpp': ['.cpp', '.cc', '.cxx', '.c++', '.hpp', '.hh', '.hxx', '.h++'],
+    'c': ['.c', '.h'],
+    'java': ['.java'],
+    'go': ['.go'],
+    'c_sharp': ['.cs'],
+    'ruby': ['.rb'],
+    'php': ['.php'],
+    'swift': ['.swift'],
+    'kotlin': ['.kt', '.kts'],
+    'scala': ['.scala'],
+    'bash': ['.sh', '.bash'],
+}
+
+# Tree-sitter queries for extracting function/class signatures
+TREE_SITTER_QUERIES = {
+    'python': """
+        (class_definition
+          name: (identifier) @class_name) @class_def
+        
+        (function_definition
+          name: (identifier) @function_name
+          parameters: (parameters) @params) @function_def
+    """,
+    'javascript': """
+        (class_declaration
+          name: (identifier) @class_name
+          superclass: (class_heritage)? @superclass) @class_def
+        
+        (function_declaration
+          name: (identifier) @function_name
+          parameters: (formal_parameters) @params) @function_def
+        
+        (method_definition
+          name: (property_name) @method_name
+          parameters: (formal_parameters) @params) @method_def
+        
+        (arrow_function
+          parameters: (formal_parameters) @params) @arrow_function
+    """,
+    'typescript': """
+        (class_declaration
+          name: (type_identifier) @class_name
+          heritage_clause: (heritage_clause)? @heritage) @class_def
+        
+        (function_declaration
+          name: (identifier) @function_name
+          parameters: (formal_parameters) @params
+          return_type: (type_annotation)? @return_type) @function_def
+        
+        (method_definition
+          name: (property_name) @method_name
+          parameters: (formal_parameters) @params
+          return_type: (type_annotation)? @return_type) @method_def
+        
+        (interface_declaration
+          name: (type_identifier) @interface_name) @interface_def
+    """,
+    'rust': """
+        (struct_item
+          name: (type_identifier) @struct_name) @struct_def
+        
+        (enum_item
+          name: (type_identifier) @enum_name) @enum_def
+        
+        (function_item
+          name: (identifier) @function_name
+          parameters: (parameters) @params) @function_def
+        
+        (impl_item
+          type: (type_identifier) @impl_type) @impl_def
+        
+        (trait_item
+          name: (type_identifier) @trait_name) @trait_def
+    """,
+    'cpp': """
+        (class_specifier
+          name: (type_identifier) @class_name) @class_def
+        
+        (struct_specifier
+          name: (type_identifier) @struct_name) @struct_def
+        
+        (function_definition) @function_def
+        
+        (function_declarator
+          declarator: (identifier) @function_name) @function_decl
+    """,
+    'c': """
+        (struct_specifier
+          name: (type_identifier) @struct_name) @struct_def
+        
+        (function_definition
+          declarator: (function_declarator
+            declarator: (identifier) @function_name
+            parameters: (parameter_list) @params)) @function_def
+        
+        (declaration
+          declarator: (function_declarator
+            declarator: (identifier) @function_name
+            parameters: (parameter_list) @params)) @function_decl
+    """,
+    'java': """
+        (class_declaration
+          name: (identifier) @class_name
+          superclass: (superclass)? @superclass
+          interfaces: (super_interfaces)? @interfaces) @class_def
+        
+        (interface_declaration
+          name: (identifier) @interface_name) @interface_def
+        
+        (method_declaration
+          name: (identifier) @method_name
+          parameters: (formal_parameters) @params
+          type: (type_identifier)? @return_type) @method_def
+        
+        (constructor_declaration
+          name: (identifier) @constructor_name
+          parameters: (formal_parameters) @params) @constructor_def
+    """,
+    'go': """
+        (type_declaration
+          (type_spec
+            name: (type_identifier) @type_name
+            type: (struct_type))) @struct_def
+        
+        (type_declaration
+          (type_spec
+            name: (type_identifier) @type_name
+            type: (interface_type))) @interface_def
+        
+        (function_declaration
+          name: (identifier) @function_name
+          parameters: (parameter_list) @params
+          result: (parameter_list)? @return_type) @function_def
+        
+        (method_declaration
+          receiver: (parameter_list) @receiver
+          name: (identifier) @method_name
+          parameters: (parameter_list) @params
+          result: (parameter_list)? @return_type) @method_def
+    """,
+}
+
+
+class RepoMapper:
+    """Handles repository mapping using git and tree-sitter"""
+    
+    def __init__(self, repo_path=None):
+        self.repo_path = repo_path or os.getcwd()
+        self.languages = {}
+        self.parsers = {}
+        self._load_available_languages()
+    
+    def _load_available_languages(self):
+        """Load available tree-sitter languages"""
+        if not TREE_SITTER_AVAILABLE:
+            return
+            
+        # Try to load common tree-sitter language libraries
+        language_names = ['python', 'javascript', 'typescript', 'rust', 'cpp', 'c', 'java', 'go']
+        
+        for lang_name in language_names:
+            try:
+                # Try different possible module names
+                possible_names = [
+                    f'tree_sitter_{lang_name}',
+                    f'tree-sitter-{lang_name}',
+                    lang_name
+                ]
+                
+                for module_name in possible_names:
+                    try:
+                        module = __import__(module_name)
+                        if hasattr(module, 'language'):
+                            language_func = module.language()
+                            language = Language(language_func)
+                            self.languages[lang_name] = language
+                            parser = Parser()
+                            parser.language = language
+                            self.parsers[lang_name] = parser
+                            print(f"[Debug] Loaded tree-sitter language: {lang_name}")
+                            break
+                    except ImportError:
+                        continue
+                        
+            except Exception as e:
+                print(f"[Debug] Could not load tree-sitter language {lang_name}: {e}")
+                continue
+    
+    def _get_language_for_file(self, file_path):
+        """Determine the programming language for a file based on extension"""
+        ext = Path(file_path).suffix.lower()
+        
+        for lang, extensions in LANGUAGE_EXTENSIONS.items():
+            if ext in extensions:
+                return lang
+        return None
+    
+    def _get_git_files(self):
+        """Get list of files tracked by git"""
+        try:
+            result = subprocess.run(
+                ['git', 'ls-files'],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
+                return [os.path.join(self.repo_path, f) for f in files]
+            else:
+                print(f"[Warning] Git ls-files failed: {result.stderr}")
+                return []
+                
+        except Exception as e:
+            print(f"[Warning] Failed to get git files: {e}")
+            return []
+    
+    def _parse_file_signatures(self, file_path, language):
+        """Parse a file and extract function/class signatures"""
+        if language not in self.parsers or language not in TREE_SITTER_QUERIES:
+            return []
+        
+        try:
+            with open(file_path, 'rb') as f:
+                source_code = f.read()
+            
+            parser = self.parsers[language]
+            tree = parser.parse(source_code)
+            
+            query = self.languages[language].query(TREE_SITTER_QUERIES[language])
+            captures = query.captures(tree.root_node)
+            
+            signatures = []
+            
+            # captures is a dict where keys are capture names and values are lists of nodes
+            for capture_name, nodes in captures.items():
+                for node in nodes:
+                    node_text = source_code[node.start_byte:node.end_byte].decode('utf-8', errors='ignore')
+                    
+                    if capture_name.endswith('_def'):
+                        # This is a complete definition, extract the signature
+                        if capture_name == 'class_def':
+                            signatures.append({
+                                'type': 'class',
+                                'name': self._extract_name_from_node(node, source_code, 'class'),
+                                'line': node.start_point[0] + 1,
+                                'signature': self._extract_signature(node, source_code, 'class')
+                            })
+                        elif capture_name in ['function_def', 'method_def', 'async_function_def']:
+                            signatures.append({
+                                'type': 'function',
+                                'name': self._extract_name_from_node(node, source_code, 'function'),
+                                'line': node.start_point[0] + 1,
+                                'signature': self._extract_signature(node, source_code, 'function')
+                            })
+                        elif capture_name in ['struct_def', 'enum_def', 'trait_def', 'interface_def']:
+                            signatures.append({
+                                'type': capture_name.replace('_def', ''),
+                                'name': self._extract_name_from_node(node, source_code, 'type'),
+                                'line': node.start_point[0] + 1,
+                                'signature': self._extract_signature(node, source_code, 'type')
+                            })
+                    elif capture_name == 'function_decl':
+                        # Handle C++ function declarations
+                        signatures.append({
+                            'type': 'function',
+                            'name': self._extract_name_from_node(node, source_code, 'function'),
+                            'line': node.start_point[0] + 1,
+                            'signature': self._extract_signature(node, source_code, 'function')
+                        })
+            
+            return signatures
+            
+        except Exception as e:
+            print(f"[Warning] Failed to parse {file_path}: {e}")
+            return []
+    
+    def _extract_name_from_node(self, node, source_code, node_type):
+        """Extract the name from a definition node"""
+        try:
+            # Look for identifier nodes within the definition
+            for child in node.children:
+                if child.type == 'identifier' or child.type == 'type_identifier':
+                    return source_code[child.start_byte:child.end_byte].decode('utf-8', errors='ignore')
+                # Recursively search in child nodes
+                for grandchild in child.children:
+                    if grandchild.type == 'identifier' or grandchild.type == 'type_identifier':
+                        return source_code[grandchild.start_byte:grandchild.end_byte].decode('utf-8', errors='ignore')
+            return "unknown"
+        except:
+            return "unknown"
+    
+    def _extract_signature(self, node, source_code, node_type):
+        """Extract a clean signature from a definition node"""
+        try:
+            # Get the first line of the definition
+            lines = source_code[node.start_byte:node.end_byte].decode('utf-8', errors='ignore').split('\n')
+            first_line = lines[0].strip()
+            
+            # For multi-line signatures, try to get the complete signature
+            if node_type == 'function' and not first_line.endswith(':') and not first_line.endswith('{') and not first_line.endswith(';'):
+                # Look for more lines that might be part of the signature
+                for i, line in enumerate(lines[1:], 1):
+                    first_line += ' ' + line.strip()
+                    if line.strip().endswith(':') or line.strip().endswith('{') or line.strip().endswith(';'):
+                        break
+                    if i > 3:  # Don't go too far
+                        break
+            
+            # Clean up the signature
+            first_line = re.sub(r'\s+', ' ', first_line)  # Normalize whitespace
+            return first_line
+            
+        except:
+            return "unknown signature"
+    
+    def generate_repo_map(self):
+        """Generate a repository map with function and class signatures"""
+        if not TREE_SITTER_AVAILABLE:
+            return "Error: tree-sitter not available. Install tree-sitter and language parsers to use repo-map."
+        
+        if not self.languages:
+            return "Error: No tree-sitter language parsers found. Install tree-sitter language libraries (e.g., tree-sitter-python, tree-sitter-rust, etc.)"
+        
+        git_files = self._get_git_files()
+        if not git_files:
+            return "Error: No git repository found or no tracked files."
+        
+        repo_map = {}
+        supported_files = 0
+        
+        for file_path in git_files:
+            if not os.path.exists(file_path):
+                continue
+                
+            language = self._get_language_for_file(file_path)
+            if language and language in self.parsers:
+                supported_files += 1
+                signatures = self._parse_file_signatures(file_path, language)
+                if signatures:
+                    rel_path = os.path.relpath(file_path, self.repo_path)
+                    repo_map[rel_path] = {
+                        'language': language,
+                        'signatures': signatures
+                    }
+        
+        # Format the output
+        if not repo_map:
+            return f"No parseable files found. Checked {len(git_files)} git-tracked files, {supported_files} had supported extensions."
+        
+        output_lines = []
+        output_lines.append(f"Repository Map ({len(repo_map)} files with {sum(len(data['signatures']) for data in repo_map.values())} signatures)")
+        output_lines.append("=" * 80)
+        
+        for file_path, data in sorted(repo_map.items()):
+            output_lines.append(f"\n📁 {file_path} ({data['language']})")
+            output_lines.append("-" * 40)
+            
+            # Group signatures by type
+            classes = [s for s in data['signatures'] if s['type'] == 'class']
+            functions = [s for s in data['signatures'] if s['type'] == 'function']
+            others = [s for s in data['signatures'] if s['type'] not in ['class', 'function']]
+            
+            for sig_group, icon in [(classes, '🏛️'), (functions, '⚡'), (others, '🔧')]:
+                for sig in sorted(sig_group, key=lambda x: x['line']):
+                    output_lines.append(f"  {icon} L{sig['line']:4d}: {sig['signature']}")
+        
+        return '\n'.join(output_lines)
 
 # ANSI Color Codes
 COLOR_RED = '\033[91m'
@@ -1037,6 +1464,50 @@ class ShellHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-type", "text/plain")
                 self.end_headers()
                 self.wfile.write(str(e).encode())
+        elif self.path == "/repo-map":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                repo_path = None
+                
+                if content_length > 0:
+                    post_data = self.rfile.read(content_length)
+                    try:
+                        data = json.loads(post_data)
+                        repo_path = data.get("path")
+                    except json.JSONDecodeError:
+                        # If it's not JSON, treat it as plain text path
+                        repo_path = post_data.decode('utf-8').strip()
+                
+                # Default to shell's current working directory if no path provided
+                if not repo_path:
+                    shell = self.get_shell()
+                    repo_path = shell.cwd
+                
+                # Expand tilde and make absolute path
+                if repo_path.startswith("~/"):
+                    repo_path = os.path.expanduser(repo_path)
+                elif not os.path.isabs(repo_path):
+                    shell = self.get_shell()
+                    repo_path = os.path.join(shell.cwd, repo_path)
+                
+                print(f"[Debug] repo-map using path: {repo_path}")
+                
+                repo_mapper = RepoMapper(repo_path)
+                result = repo_mapper.generate_repo_map()
+                
+                self.send_response(200)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(result.encode())
+            except Exception as e:
+                print(f"[Error] repo-map operation failed: {str(e)}")
+                import traceback
+                print(f"[Error] Traceback: {traceback.format_exc()}")
+                self.send_response(500)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                error_msg = f"repo-map failed: {str(e)}"
+                self.wfile.write(error_msg.encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -1329,7 +1800,43 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Start shell server')
     parser.add_argument('--port', type=int, default=6666, help='Port to run the server on')
     parser.add_argument('--secure', action='store_true', help='Enable secure mode with command confirmation')
+    parser.add_argument('--generate-repo-map', action='store_true', help='Generate .repo-map file in current directory and exit')
     args = parser.parse_args()
+
+    # Handle repo-map generation if requested
+    if args.generate_repo_map:
+        print("Generating .repo-map file...")
+        try:
+            repo_mapper = RepoMapper(os.getcwd())
+            repo_map_content = repo_mapper.generate_repo_map()
+            
+            # Write to .repo-map file in current directory
+            repo_map_file = os.path.join(os.getcwd(), '.repo-map')
+            with open(repo_map_file, 'w', encoding='utf-8') as f:
+                f.write(repo_map_content)
+            
+            print(f"✅ Repository map generated successfully: {repo_map_file}")
+            print(f"📊 File size: {os.path.getsize(repo_map_file)} bytes")
+            
+            # Show a preview of the content
+            lines = repo_map_content.split('\n')
+            if len(lines) > 10:
+                print("\n📋 Preview (first 10 lines):")
+                for i, line in enumerate(lines[:10], 1):
+                    print(f"  {i:2d}: {line}")
+                print(f"  ... ({len(lines) - 10} more lines)")
+            else:
+                print(f"\n📋 Content ({len(lines)} lines):")
+                for i, line in enumerate(lines, 1):
+                    print(f"  {i:2d}: {line}")
+                    
+        except Exception as e:
+            print(f"❌ Error generating repo-map: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            sys.exit(1)
+        
+        sys.exit(0)
 
     # Set secure mode based on command line argument
     ShellHandler.secure_mode = args.secure
