@@ -267,11 +267,37 @@ class RepoMapper:
         return None
     
     def _get_git_files(self):
-        """Get list of files tracked by git"""
+        """Get list of files tracked by git in the current directory and subdirectories"""
         try:
-            result = subprocess.run(
-                ['git', 'ls-files'],
+            # First, get the git repository root
+            repo_root_result = subprocess.run(
+                ['git', 'rev-parse', '--show-toplevel'],
                 cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if repo_root_result.returncode != 0:
+                print(f"[Warning] Failed to get git repo root: {repo_root_result.stderr}")
+                return []
+            
+            repo_root = repo_root_result.stdout.strip()
+            
+            # Calculate relative path from repo root to current directory
+            rel_path = os.path.relpath(self.repo_path, repo_root)
+            
+            # If we're at the repo root, use all files; otherwise limit to current subfolder
+            if rel_path == '.':
+                # At repo root, get all files
+                git_cmd = ['git', 'ls-files']
+            else:
+                # In a subfolder, only get files in this subfolder and below
+                git_cmd = ['git', 'ls-files', rel_path]
+            
+            result = subprocess.run(
+                git_cmd,
+                cwd=repo_root,  # Run from repo root for consistent paths
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -279,7 +305,8 @@ class RepoMapper:
             
             if result.returncode == 0:
                 files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
-                return [os.path.join(self.repo_path, f) for f in files]
+                # Convert relative paths to absolute paths
+                return [os.path.join(repo_root, f) for f in files]
             else:
                 print(f"[Warning] Git ls-files failed: {result.stderr}")
                 return []
@@ -421,8 +448,26 @@ class RepoMapper:
         if not repo_map:
             return f"No parseable files found. Checked {len(git_files)} git-tracked files, {supported_files} had supported extensions."
         
+        # Get relative path info for the header
+        try:
+            repo_root_result = subprocess.run(
+                ['git', 'rev-parse', '--show-toplevel'],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if repo_root_result.returncode == 0:
+                repo_root = repo_root_result.stdout.strip()
+                rel_path = os.path.relpath(self.repo_path, repo_root)
+                scope_info = f" in ./{rel_path}" if rel_path != '.' else " (entire repository)"
+            else:
+                scope_info = ""
+        except:
+            scope_info = ""
+        
         output_lines = []
-        output_lines.append(f"Repository Map ({len(repo_map)} files with {sum(len(data['signatures']) for data in repo_map.values())} signatures)")
+        output_lines.append(f"Repository Map{scope_info} ({len(repo_map)} files with {sum(len(data['signatures']) for data in repo_map.values())} signatures)")
         output_lines.append("=" * 80)
         
         for file_path, data in sorted(repo_map.items()):
