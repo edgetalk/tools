@@ -1370,7 +1370,7 @@ class ShellHandler(BaseHTTPRequestHandler):
                             raise ValueError(f"Process seems to have terminated or I/O error occurred.")
 
                     # Wait for output
-                    time.sleep(0.5)
+                    time.sleep(2.0)
                     
                     # Read output
                     if IS_WINDOWS:
