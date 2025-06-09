@@ -1589,9 +1589,28 @@ class ShellHandler(BaseHTTPRequestHandler):
 
             if os.path.isfile(abs_path):
                 with open(abs_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                count = content.count(old_str)
-                return f"String '{old_str}' appears {count} times in the file"
+                    lines = f.readlines()
+                
+                occurrences = []
+                total_count = 0
+                
+                for line_num, line in enumerate(lines, 1):
+                    line_count = line.count(old_str)
+                    if line_count > 0:
+                        total_count += line_count
+                        # If multiple occurrences on same line, note that
+                        if line_count == 1:
+                            occurrences.append(f"Line {line_num}")
+                        else:
+                            occurrences.append(f"Line {line_num} ({line_count} times)")
+                
+                if total_count == 0:
+                    return f"String '{old_str}' not found in the file"
+                elif total_count == 1:
+                    return f"String '{old_str}' appears 1 time in the file at {occurrences[0]}"
+                else:
+                    locations = ", ".join(occurrences)
+                    return f"String '{old_str}' appears {total_count} times in the file at: {locations}"
             else:
                 raise FileNotFoundError(f"File not found: {path}")
         elif command == "view":
