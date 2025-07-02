@@ -18,13 +18,14 @@ pip install tree-sitter-typescript==0.23.2  # TypeScript support
 pip install tree-sitter-cpp==0.23.4         # C++ support
 pip install tree-sitter-java==0.23.5        # Java support
 pip install tree-sitter-go==0.23.4          # Go support
+pip install tree-sitter-c-sharp==0.21.0     # C# support
 
 # For Rust and C, use compatible versions:
 pip install tree-sitter-rust==0.21.2        # Rust support (compatible version)
 pip install tree-sitter-c==0.21.3           # C support (compatible version)
 
 # Install all at once:
-pip install tree-sitter==0.24.0 tree-sitter-python==0.23.6 tree-sitter-javascript==0.23.1 tree-sitter-typescript==0.23.2 tree-sitter-cpp==0.23.4 tree-sitter-java==0.23.5 tree-sitter-go==0.23.4 tree-sitter-rust==0.21.2 tree-sitter-c==0.21.3
+pip install tree-sitter==0.24.0 tree-sitter-python==0.23.6 tree-sitter-javascript==0.23.1 tree-sitter-typescript==0.23.2 tree-sitter-cpp==0.23.4 tree-sitter-java==0.23.5 tree-sitter-go==0.23.4 tree-sitter-c-sharp==0.21.0 tree-sitter-rust==0.21.2 tree-sitter-c==0.21.3
 
 NOTES:
 - tree-sitter is optional - the server works without it
