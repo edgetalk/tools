@@ -212,8 +212,7 @@ TREE_SITTER_QUERIES = {
     """,
     'c_sharp': """
         (class_declaration
-          name: (identifier) @class_name
-          bases: (base_list)? @bases) @class_def
+          name: (identifier) @class_name) @class_def
         
         (struct_declaration
           name: (identifier) @struct_name) @struct_def
@@ -227,7 +226,7 @@ TREE_SITTER_QUERIES = {
         (method_declaration
           name: (identifier) @method_name
           parameters: (parameter_list) @params
-          type: (type_pattern)? @return_type) @method_def
+          type: (_)? @return_type) @method_def
         
         (constructor_declaration
           name: (identifier) @constructor_name
@@ -235,10 +234,10 @@ TREE_SITTER_QUERIES = {
         
         (property_declaration
           name: (identifier) @property_name
-          type: (type_pattern) @property_type) @property_def
+          type: (_) @property_type) @property_def
         
         (namespace_declaration
-          name: (qualified_name) @namespace_name) @namespace_def
+          name: (identifier) @namespace_name) @namespace_def
     """,
 }
 
