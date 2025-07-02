@@ -228,7 +228,7 @@ class RepoMapper:
             return
             
         # Try to load common tree-sitter language libraries
-        language_names = ['python', 'javascript', 'typescript', 'rust', 'cpp', 'c', 'java', 'go']
+        language_names = ['python', 'javascript', 'typescript', 'rust', 'cpp', 'c', 'java', 'go', 'c_sharp']
         
         for lang_name in language_names:
             try:
