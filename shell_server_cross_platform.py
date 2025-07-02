@@ -515,9 +515,10 @@ class RepoMapper:
             # Group signatures by type
             classes = [s for s in data['signatures'] if s['type'] == 'class']
             functions = [s for s in data['signatures'] if s['type'] == 'function']
-            others = [s for s in data['signatures'] if s['type'] not in ['class', 'function']]
+            properties = [s for s in data['signatures'] if s['type'] == 'property']
+            others = [s for s in data['signatures'] if s['type'] not in ['class', 'function', 'property']]
             
-            for sig_group, icon in [(classes, '🏛️'), (functions, '⚡'), (others, '🔧')]:
+            for sig_group, icon in [(classes, '🏛️'), (functions, '⚡'), (properties, '🔧'), (others, '📦')]:
                 for sig in sorted(sig_group, key=lambda x: x['line']):
                     output_lines.append(f"  {icon} L{sig['line']:4d}: {sig['signature']}")
         
