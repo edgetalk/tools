@@ -9,7 +9,7 @@ The repo-map functionality requires tree-sitter and language parsers.
 Install the following packages for full language support:
 
 # Core tree-sitter (required)
-pip install tree-sitter==0.24.0
+pip install tree-sitter==0.23.2
 
 # Language parsers (install the ones you need)
 pip install tree-sitter-python==0.23.6      # Python support
