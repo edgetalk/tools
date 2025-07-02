@@ -95,8 +95,7 @@ TREE_SITTER_QUERIES = {
     """,
     'javascript': """
         (class_declaration
-          name: (identifier) @class_name
-          superclass: (class_heritage)? @superclass) @class_def
+          name: (identifier) @class_name) @class_def
         
         (function_declaration
           name: (identifier) @function_name
