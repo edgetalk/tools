@@ -377,19 +377,26 @@ class RepoMapper:
                                 'line': node.start_point[0] + 1,
                                 'signature': self._extract_signature(node, source_code, 'class')
                             })
-                        elif capture_name in ['function_def', 'method_def', 'async_function_def']:
+                        elif capture_name in ['function_def', 'method_def', 'async_function_def', 'constructor_def']:
                             signatures.append({
                                 'type': 'function',
                                 'name': self._extract_name_from_node(node, source_code, 'function'),
                                 'line': node.start_point[0] + 1,
                                 'signature': self._extract_signature(node, source_code, 'function')
                             })
-                        elif capture_name in ['struct_def', 'enum_def', 'trait_def', 'interface_def']:
+                        elif capture_name in ['struct_def', 'enum_def', 'trait_def', 'interface_def', 'namespace_def']:
                             signatures.append({
                                 'type': capture_name.replace('_def', ''),
                                 'name': self._extract_name_from_node(node, source_code, 'type'),
                                 'line': node.start_point[0] + 1,
                                 'signature': self._extract_signature(node, source_code, 'type')
+                            })
+                        elif capture_name == 'property_def':
+                            signatures.append({
+                                'type': 'property',
+                                'name': self._extract_name_from_node(node, source_code, 'property'),
+                                'line': node.start_point[0] + 1,
+                                'signature': self._extract_signature(node, source_code, 'property')
                             })
                     elif capture_name == 'function_decl':
                         # Handle C++ function declarations
