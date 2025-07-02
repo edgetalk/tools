@@ -225,8 +225,7 @@ TREE_SITTER_QUERIES = {
         
         (method_declaration
           name: (identifier) @method_name
-          parameters: (parameter_list) @params
-          type: (_)? @return_type) @method_def
+          parameters: (parameter_list) @params) @method_def
         
         (constructor_declaration
           name: (identifier) @constructor_name
@@ -234,7 +233,7 @@ TREE_SITTER_QUERIES = {
         
         (property_declaration
           name: (identifier) @property_name
-          type: (_) @property_type) @property_def
+          type: (type) @property_type) @property_def
         
         (namespace_declaration
           name: (identifier) @namespace_name) @namespace_def
