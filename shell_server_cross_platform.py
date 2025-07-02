@@ -210,6 +210,36 @@ TREE_SITTER_QUERIES = {
           parameters: (parameter_list) @params
           result: (parameter_list)? @return_type) @method_def
     """,
+    'c_sharp': """
+        (class_declaration
+          name: (identifier) @class_name
+          bases: (base_list)? @bases) @class_def
+        
+        (struct_declaration
+          name: (identifier) @struct_name) @struct_def
+        
+        (interface_declaration
+          name: (identifier) @interface_name) @interface_def
+        
+        (enum_declaration
+          name: (identifier) @enum_name) @enum_def
+        
+        (method_declaration
+          name: (identifier) @method_name
+          parameters: (parameter_list) @params
+          type: (type_pattern)? @return_type) @method_def
+        
+        (constructor_declaration
+          name: (identifier) @constructor_name
+          parameters: (parameter_list) @params) @constructor_def
+        
+        (property_declaration
+          name: (identifier) @property_name
+          type: (type_pattern) @property_type) @property_def
+        
+        (namespace_declaration
+          name: (qualified_name) @namespace_name) @namespace_def
+    """,
 }
 
 
