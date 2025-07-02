@@ -223,16 +223,13 @@ TREE_SITTER_QUERIES = {
           name: (identifier) @enum_name) @enum_def
         
         (method_declaration
-          name: (identifier) @method_name
-          parameters: (parameter_list) @params) @method_def
+          name: (identifier) @method_name) @method_def
         
         (constructor_declaration
-          name: (identifier) @constructor_name
-          parameters: (parameter_list) @params) @constructor_def
+          name: (identifier) @constructor_name) @constructor_def
         
         (property_declaration
-          name: (identifier) @property_name
-          type: (type) @property_type) @property_def
+          name: (identifier) @property_name) @property_def
         
         (namespace_declaration
           name: (identifier) @namespace_name) @namespace_def
