@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARRAKIS MEMORY ANALYZER - SONGBIRD PROTOCOL</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@400;700;900&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;
+            font-family: 'JetBrains Mono', monospace;
+            color: #00ffff;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 20% 20%, rgba(255, 0, 150, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(0, 255, 255, 0.05) 0%, transparent 50%);
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.9);
+            border-bottom: 2px solid #00ffff;
+            padding: 15px 20px;
+            box-shadow: 0 2px 20px rgba(0, 255, 255, 0.3);
+        }
+
+        .header h1 {
+            font-family: 'Orbitron', monospace;
+            font-size: 1.5em;
+            font-weight: 900;
+            text-align: center;
+            text-shadow: 0 0 10px #00ffff;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-group label {
+            font-size: 0.9em;
+            color: #00cccc;
+        }
+
+        input[type="text"], input[type="number"] {
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #00ffff;
+            color: #00ffff;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9em;
+        }
+
+        input[type="text"]:focus, input[type="number"]:focus {
+            outline: none;
+            box-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+        }
+
+        button {
+            background: linear-gradient(45deg, #ff0080, #00ffff);
+            border: none;
+            color: #000;
+            padding: 8px 15px;
+            border-radius: 3px;
+            font-family: 'Orbitron', monospace;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(255, 0, 128, 0.5);
+        }
+
+        .main-container {
+            display: flex;
+            height: calc(100vh - 120px);
+            gap: 10px;
+            padding: 10px;
+        }
+
+        .hex-panel {
+            flex: 2;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #00ffff;
+            border-radius: 5px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            background: rgba(0, 255, 255, 0.1);
+            padding: 10px;
+            border-bottom: 1px solid #00ffff;
+            font-family: 'Orbitron', monospace;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .hex-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            font-size: 0.85em;
+            line-height: 1.4;
+        }
+
+        .hex-line {
+            display: flex;
+            margin-bottom: 2px;
+            padding: 2px 0;
+            border-radius: 2px;
+            transition: background-color 0.2s;
+        }
+
+        .hex-line:hover {
+            background: rgba(0, 255, 255, 0.1);
+        }
+
+        .hex-address {
+            color: #ff0080;
+            width: 120px;
+            flex-shrink: 0;
+            font-weight: 700;
+        }
+
+        .hex-bytes {
+            flex: 1;
+            margin: 0 15px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .hex-byte {
+            display: inline-block;
+            width: 24px;
+            text-align: center;
+            cursor: pointer;
+            padding: 1px;
+            border-radius: 2px;
+            transition: all 0.2s;
+        }
+
+        .hex-byte:hover {
+            background: rgba(255, 0, 128, 0.3);
+            color: #fff;
+        }
+
+        .hex-byte.selected {
+            background: #ff0080;
+            color: #000;
+            font-weight: 700;
+        }
+
+        .hex-ascii {
+            width: 150px;
+            flex-shrink: 0;
+            color: #ffff00;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .info-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .info-section {
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #00ffff;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .info-content {
+            padding: 10px;
+            font-size: 0.9em;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+        }
+
+        .info-label {
+            color: #00cccc;
+            font-weight: 700;
+        }
+
+        .info-value {
+            color: #ffff00;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .pointer-value {
+            color: #ff0080;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .pointer-value:hover {
+            color: #fff;
+            text-shadow: 0 0 5px #ff0080;
+        }
+
+        .status-bar {
+            background: rgba(0, 0, 0, 0.9);
+            border-top: 1px solid #00ffff;
+            padding: 8px 20px;
+            font-size: 0.8em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .error {
+            color: #ff4444;
+            font-weight: 700;
+        }
+
+        .success {
+            color: #44ff44;
+            font-weight: 700;
+        }
+
+        .navigation-history {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .nav-item {
+            padding: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+            margin-bottom: 2px;
+            transition: background-color 0.2s;
+        }
+
+        .nav-item:hover {
+            background: rgba(0, 255, 255, 0.2);
+        }
+
+        .nav-item.current {
+            background: rgba(255, 0, 128, 0.3);
+            font-weight: 700;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 255, 0.5);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 255, 0.8);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>ARRAKIS MEMORY ANALYZER</h1>
+        <div class="controls">
+            <div class="control-group">
+                <label>Address:</label>
+                <input type="text" id="addressInput" placeholder="0x7FF6A0000000" value="0x7FF6A0000000">
+            </div>
+            <div class="control-group">
+                <label>Size:</label>
+                <input type="number" id="sizeInput" value="256" min="1" max="4096">
+            </div>
+            <button onclick="readMemory()">SCAN MEMORY</button>
+            <button onclick="followPointer()">FOLLOW POINTER</button>
+            <button onclick="goBack()">BACK</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="hex-panel">
+            <div class="panel-header">MEMORY DUMP</div>
+            <div class="hex-content" id="hexContent">
+                <div style="text-align: center; color: #666; margin-top: 50px;">
+                    Enter an address and click SCAN MEMORY to begin analysis
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <div class="info-section">
+                <div class="panel-header">BYTE ANALYSIS</div>
+                <div class="info-content" id="byteAnalysis">
+                    <div class="info-row">
+                        <span class="info-label">Selected:</span>
+                        <span class="info-value">None</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <div class="panel-header">NAVIGATION HISTORY</div>
+                <div class="info-content navigation-history" id="navigationHistory">
+                    <div style="color: #666; text-align: center;">No navigation history</div>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <div class="panel-header">POINTER CANDIDATES</div>
+                <div class="info-content" id="pointerCandidates">
+                    <div style="color: #666; text-align: center;">Select bytes to analyze pointers</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <div id="statusMessage">Ready for memory analysis</div>
+        <div id="connectionStatus">Disconnected</div>
+    </div>
+
+    <script>
+        let currentData = null;
+        let selectedBytes = [];
+        let navigationHistory = [];
+        let currentHistoryIndex = -1;
+
+        const SERVER_URL = 'http://192.168.50.33:20073';
+
+        async function readMemory() {
+            const addressInput = document.getElementById('addressInput').value.trim();
+            const sizeInput = parseInt(document.getElementById('sizeInput').value);
+
+            if (!addressInput || !sizeInput) {
+                setStatus('Please enter valid address and size', 'error');
+                return;
+            }
+
+            let address;
+            try {
+                // Handle hex addresses
+                if (addressInput.startsWith('0x') || addressInput.startsWith('0X')) {
+                    address = parseInt(addressInput, 16);
+                } else {
+                    address = parseInt(addressInput, 10);
+                }
+            } catch (e) {
+                setStatus('Invalid address format', 'error');
+                return;
+            }
+
+            setStatus('Reading memory...', '');
+            setConnectionStatus('Connecting...');
+
+            try {
+                const response = await fetch(`${SERVER_URL}/read-memory`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        address: address,
+                        size: sizeInput
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.text();
+                
+                // Add to navigation history
+                addToHistory(address, sizeInput);
+                
+                currentData = {
+                    address: address,
+                    size: sizeInput,
+                    hexData: data
+                };
+
+                displayHexData(currentData);
+                setStatus(`Successfully read ${sizeInput} bytes from 0x${address.toString(16).toUpperCase()}`, 'success');
+                setConnectionStatus('Connected');
+
+            } catch (error) {
+                setStatus(`Error: ${error.message}`, 'error');
+                setConnectionStatus('Error');
+                console.error('Memory read error:', error);
+            }
+        }
+
+        function displayHexData(data) {
+            const hexContent = document.getElementById('hexContent');
+            const hexData = data.hexData;
+            
+            // Convert hex string to bytes
+            const bytes = [];
+            for (let i = 0; i < hexData.length; i += 2) {
+                bytes.push(hexData.substr(i, 2));
+            }
+
+            let html = '';
+            const bytesPerLine = 16;
+            
+            for (let i = 0; i < bytes.length; i += bytesPerLine) {
+                const lineAddress = data.address + i;
+                const lineBytes = bytes.slice(i, i + bytesPerLine);
+                
+                html += '<div class="hex-line">';
+                html += `<div class="hex-address">0x${lineAddress.toString(16).toUpperCase().padStart(8, '0')}</div>`;
+                
+                // Hex bytes
+                html += '<div class="hex-bytes">';
+                for (let j = 0; j < bytesPerLine; j++) {
+                    if (j < lineBytes.length) {
+                        html += `<span class="hex-byte" data-offset="${i + j}" onclick="selectByte(${i + j})">${lineBytes[j]}</span>`;
+                    } else {
+                        html += '<span class="hex-byte">  </span>';
+                    }
+                    if (j === 7) html += ' '; // Extra space in middle
+                }
+                html += '</div>';
+                
+                // ASCII representation
+                html += '<div class="hex-ascii">';
+                for (let j = 0; j < lineBytes.length; j++) {
+                    const byteVal = parseInt(lineBytes[j], 16);
+                    const char = (byteVal >= 32 && byteVal <= 126) ? String.fromCharCode(byteVal) : '.';
+                    html += char;
+                }
+                html += '</div>';
+                
+                html += '</div>';
+            }
+            
+            hexContent.innerHTML = html;
+            selectedBytes = [];
+            updateByteAnalysis();
+        }
+
+        function selectByte(offset) {
+            // Toggle selection
+            const index = selectedBytes.indexOf(offset);
+            if (index > -1) {
+                selectedBytes.splice(index, 1);
+            } else {
+                selectedBytes.push(offset);
+            }
+            
+            // Sort selected bytes
+            selectedBytes.sort((a, b) => a - b);
+            
+            // Update visual selection
+            document.querySelectorAll('.hex-byte').forEach(el => el.classList.remove('selected'));
+            selectedBytes.forEach(offset => {
+                const el = document.querySelector(`[data-offset="${offset}"]`);
+                if (el) el.classList.add('selected');
+            });
+            
+            updateByteAnalysis();
+            updatePointerCandidates();
+        }
+
+        function updateByteAnalysis() {
+            const analysisDiv = document.getElementById('byteAnalysis');
+            
+            if (selectedBytes.length === 0) {
+                analysisDiv.innerHTML = '<div class="info-row"><span class="info-label">Selected:</span><span class="info-value">None</span></div>';
+                return;
+            }
+
+            const hexData = currentData.hexData;
+            const selectedHex = selectedBytes.map(offset => hexData.substr(offset * 2, 2)).join(' ');
+            
+            let html = `<div class="info-row"><span class="info-label">Selected:</span><span class="info-value">${selectedHex}</span></div>`;
+            html += `<div class="info-row"><span class="info-label">Count:</span><span class="info-value">${selectedBytes.length} bytes</span></div>`;
+            
+            if (selectedBytes.length <= 8) {
+                const bytes = selectedBytes.map(offset => parseInt(hexData.substr(offset * 2, 2), 16));
+                
+                // Little-endian interpretations
+                if (bytes.length >= 2) {
+                    const uint16 = bytes[0] + (bytes[1] << 8);
+                    html += `<div class="info-row"><span class="info-label">UInt16 LE:</span><span class="info-value">${uint16}</span></div>`;
+                }
+                
+                if (bytes.length >= 4) {
+                    const uint32 = bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24);
+                    html += `<div class="info-row"><span class="info-label">UInt32 LE:</span><span class="info-value">${uint32}</span></div>`;
+                    html += `<div class="info-row"><span class="info-label">Hex:</span><span class="info-value">0x${uint32.toString(16).toUpperCase()}</span></div>`;
+                }
+                
+                if (bytes.length === 8) {
+                    // 64-bit pointer (careful with JavaScript number precision)
+                    const low = bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24);
+                    const high = bytes[4] + (bytes[5] << 8) + (bytes[6] << 16) + (bytes[7] << 24);
+                    const ptr = high * Math.pow(2, 32) + (low >>> 0); // Use unsigned right shift
+                    html += `<div class="info-row"><span class="info-label">UInt64 LE:</span><span class="info-value pointer-value" onclick="navigateToAddress(${ptr})">${ptr}</span></div>`;
+                    html += `<div class="info-row"><span class="info-label">Ptr Hex:</span><span class="info-value pointer-value" onclick="navigateToAddress(${ptr})">0x${ptr.toString(16).toUpperCase()}</span></div>`;
+                }
+                
+                // ASCII interpretation
+                const ascii = bytes.map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('');
+                html += `<div class="info-row"><span class="info-label">ASCII:</span><span class="info-value">${ascii}</span></div>`;
+            }
+            
+            analysisDiv.innerHTML = html;
+        }
+
+        function updatePointerCandidates() {
+            const candidatesDiv = document.getElementById('pointerCandidates');
+            
+            if (!currentData || currentData.hexData.length < 8) {
+                candidatesDiv.innerHTML = '<div style="color: #666; text-align: center;">Not enough data for pointer analysis</div>';
+                return;
+            }
+
+            const hexData = currentData.hexData;
+            const candidates = [];
+            
+            // Look for potential 64-bit pointers (8 bytes)
+            for (let i = 0; i < hexData.length - 14; i += 2) {
+                const bytes = [];
+                for (let j = 0; j < 8; j++) {
+                    bytes.push(parseInt(hexData.substr(i + j * 2, 2), 16));
+                }
+                
+                const low = bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24);
+                const high = bytes[4] + (bytes[5] << 8) + (bytes[6] << 16) + (bytes[7] << 24);
+                const ptr = high * Math.pow(2, 32) + (low >>> 0);
+                
+                // Basic heuristics for valid pointers
+                if (ptr > 0x10000 && ptr < 0x7FFFFFFFFFFF && high !== 0) {
+                    const offset = i / 2;
+                    const address = currentData.address + offset;
+                    candidates.push({
+                        offset: offset,
+                        address: address,
+                        value: ptr
+                    });
+                }
+            }
+            
+            if (candidates.length === 0) {
+                candidatesDiv.innerHTML = '<div style="color: #666; text-align: center;">No pointer candidates found</div>';
+                return;
+            }
+            
+            let html = '';
+            candidates.slice(0, 10).forEach(candidate => {
+                html += `<div class="nav-item" onclick="navigateToAddress(${candidate.value})">`;
+                html += `<div>Offset +0x${candidate.offset.toString(16).toUpperCase()}</div>`;
+                html += `<div style="font-size: 0.8em; color: #00cccc;">→ 0x${candidate.value.toString(16).toUpperCase()}</div>`;
+                html += '</div>';
+            });
+            
+            candidatesDiv.innerHTML = html;
+        }
+
+        function navigateToAddress(address) {
+            document.getElementById('addressInput').value = `0x${address.toString(16).toUpperCase()}`;
+            readMemory();
+        }
+
+        function followPointer() {
+            if (selectedBytes.length !== 8) {
+                setStatus('Select exactly 8 bytes to follow as pointer', 'error');
+                return;
+            }
+            
+            const hexData = currentData.hexData;
+            const bytes = selectedBytes.map(offset => parseInt(hexData.substr(offset * 2, 2), 16));
+            
+            const low = bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24);
+            const high = bytes[4] + (bytes[5] << 8) + (bytes[6] << 16) + (bytes[7] << 24);
+            const ptr = high * Math.pow(2, 32) + (low >>> 0);
+            
+            navigateToAddress(ptr);
+        }
+
+        function addToHistory(address, size) {
+            const entry = { address, size, timestamp: Date.now() };
+            
+            // Remove any entries after current position (if we went back and are now going forward)
+            if (currentHistoryIndex < navigationHistory.length - 1) {
+                navigationHistory = navigationHistory.slice(0, currentHistoryIndex + 1);
+            }
+            
+            navigationHistory.push(entry);
+            currentHistoryIndex = navigationHistory.length - 1;
+            
+            // Limit history size
+            if (navigationHistory.length > 50) {
+                navigationHistory.shift();
+                currentHistoryIndex--;
+            }
+            
+            updateNavigationHistory();
+        }
+
+        function updateNavigationHistory() {
+            const historyDiv = document.getElementById('navigationHistory');
+            
+            if (navigationHistory.length === 0) {
+                historyDiv.innerHTML = '<div style="color: #666; text-align: center;">No navigation history</div>';
+                return;
+            }
+            
+            let html = '';
+            navigationHistory.slice(-10).forEach((entry, index) => {
+                const actualIndex = navigationHistory.length - 10 + index;
+                const isCurrent = actualIndex === currentHistoryIndex;
+                html += `<div class="nav-item ${isCurrent ? 'current' : ''}" onclick="navigateToHistoryEntry(${actualIndex})">`;
+                html += `<div>0x${entry.address.toString(16).toUpperCase()}</div>`;
+                html += `<div style="font-size: 0.8em; color: #00cccc;">${entry.size} bytes</div>`;
+                html += '</div>';
+            });
+            
+            historyDiv.innerHTML = html;
+        }
+
+        function navigateToHistoryEntry(index) {
+            if (index >= 0 && index < navigationHistory.length) {
+                currentHistoryIndex = index;
+                const entry = navigationHistory[index];
+       document.getElementById('addressInput').value = `0x${entry.address.toString(16).toUpperCase()}`;
+                document.getElementById('sizeInput').value = entry.size;
+                readMemory();
+            }
+        }
+
+        function goBack() {
+            if (currentHistoryIndex > 0) {
+                navigateToHistoryEntry(currentHistoryIndex - 1);
+            } else {
+                setStatus('No previous location in history', 'error');
+            }
+        }
+
+        function setStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = type;
+        }
+
+        function setConnectionStatus(status) {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.textContent = status;
+            statusEl.className = status.toLowerCase();
+        }
+
+        // Handle Enter key in inputs
+        document.getElementById('addressInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') readMemory();
+        });
+
+        document.getElementById('sizeInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') readMemory();
+        });
+
+        // Initialize
+        setConnectionStatus('Disconnected');
+    </script>
+</body>
+
+</html>
