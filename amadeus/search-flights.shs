@@ -1,0 +1,104 @@
+@wire(get-token {
+  ; cache it into mesh globals so we don't have to re-fetch it every time
+  When({
+      amadeus/api-token-expires-at | IsLessEqual((Time.Epoch))
+    } {
+      ExpectTable = input
+      input:key | ExpectString = amadeus-api-key
+      input:secret | ExpectString = amadeus-api-secret
+      
+      ; x-www-form-urlencoded
+      ["grant_type=client_credentials&client_id=" amadeus-api-key "&client_secret=" amadeus-api-secret] | String.Join
+      Http.Post("https://test.api.amadeus.com/v1/security/oauth2/token" Headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      }) | FromJson | ExpectTable = response
+      response:access_token | ExpectString | Set(amadeus/api-token Global: true)
+      response:expires_in | ExpectInt | Add((Time.Epoch)) | Set(amadeus/api-token-expires-at Global: true)
+      amadeus/api-token
+    }
+  )
+  amadeus/api-token | Assert.IsNot("")
+})
+
+@wire(find-flights {
+  ExpectTable = input
+  input:origin | ExpectString = origin
+  input:destination | ExpectString = destination
+  input:departure-date | ExpectString = departure-date
+  input:return-date | ExpectString = return-date
+  env:amadeus-currency-code | ExpectString = currency-code
+  env:amadeus-cabin-class | ExpectString = cabin-class
+  
+  {
+    "X-HTTP-Method-Override": "GET"
+    "Content-Type": "application/json"
+    "Authorization": (["Bearer " amadeus/api-token] | String.Join)
+  } = headers
+  
+  {
+    currencyCode: currency-code
+    originDestinations: [{
+        id: "1"
+        originLocationCode: origin
+        destinationLocationCode: destination
+        departureDateTimeRange: {
+          date: departure-date
+          dateWindow: "I3D"
+        }
+      }]
+    travelers: [{
+        id: "1"
+        travelerType: "ADULT"
+      }]
+    sources: ["GDS"]
+    searchCriteria: {
+      flightFilters: {
+        cabinRestrictions: [
+          {
+            cabin: cabin-class
+            coverage: "MOST_SEGMENTS"
+            originDestinationIds: ["1"]
+          }]
+        connectionRestriction: {
+          maxNumberOfConnections: 1
+        }
+      }
+    }
+  } | ToJson | Log("Request") | Http.Post("https://test.api.amadeus.com/v2/shopping/flight-offers" Headers: headers)
+  Log("Response-Json")
+  FromJson | ExpectTable = response
+})
+
+@wire(pre-test {
+  0 | Set(amadeus/api-token-expires-at Global: true)
+  "" | Set(amadeus/api-token Global: true)
+  
+  {
+    amadeus-currency-code: "SGD"
+    amadeus-cabin-class: "BUSINESS"
+  } >= env
+  
+  Detach(test)
+  Wait(test)
+})
+
+@wire(test {
+  {
+    key: @env("AMADEUS_API_KEY")
+    secret: @env("AMADEUS_API_SECRET")
+  } | Do(get-token) | Log
+  
+  {
+    key: @env("AMADEUS_API_KEY")
+    secret: @env("AMADEUS_API_SECRET")
+  } | Do(get-token) | Log
+  
+  {
+    origin: "SIN"
+    destination: "CTA"
+    departure-date: "2025-12-20"
+    return-date: "2026-01-04"
+  } | Do(find-flights) | Log
+})
+
+SwitchTo(pre-test)
