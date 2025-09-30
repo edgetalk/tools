@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "edge talk Snapper",
+  "version": "1.0.0",
+  "description": "Capture full-page screenshots and send tiles to edge talk server",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "edge talk Snapper"
+  }
+}
