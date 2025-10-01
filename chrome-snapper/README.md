@@ -74,7 +74,8 @@ See `/Users/sugar/devel/Soul-mender/Scripts-Src/send-server.shs` for the referen
 - All tiles are collected in memory, then sent in a single batch request
 - JPEG quality: 85%
 - Scroll position is reset after capture completes
-- 150ms delay between captures to ensure rendering completes
+- 600ms delay between captures to respect Chrome's rate limit (~2 captures/second)
+- Automatic retry with 1-second backoff if rate limit is hit
 
 ## Permissions
 

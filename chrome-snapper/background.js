@@ -64,14 +64,34 @@ async function captureFullPage(tabId, endpoint, textMessage, hidden) {
           y: scrollY
         });
 
-        // Small delay to ensure rendering
-        await sleep(150);
+        // Delay to ensure rendering and respect Chrome's rate limit
+        // Chrome limits captureVisibleTab to ~2 calls per second
+        await sleep(600);
 
-        // Capture visible tab as JPEG
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-          format: 'jpeg',
-          quality: 85
-        });
+        // Capture visible tab as JPEG with retry logic
+        let dataUrl;
+        let retries = 3;
+        while (retries > 0) {
+          try {
+            dataUrl = await chrome.tabs.captureVisibleTab(null, {
+              format: 'jpeg',
+              quality: 85
+            });
+            break;
+          } catch (error) {
+            if (error.message.includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND')) {
+              retries--;
+              if (retries > 0) {
+                console.log(`Rate limit hit, retrying... (${retries} attempts left)`);
+                await sleep(1000); // Wait 1 second before retry
+              } else {
+                throw new Error('Rate limit exceeded after retries');
+              }
+            } else {
+              throw error;
+            }
+          }
+        }
 
         // Extract base64 data from data URL
         const base64Data = dataUrl.split(',')[1];
