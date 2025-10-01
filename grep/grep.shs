@@ -12,8 +12,8 @@
   args:invert_match | If(Is(true) {true} {false}) = invert-match
   args:max_matches | If(IsNone {0} {ExpectInt}) = max-matches
   
-  ; Call Codex.Grep with all parameters
-  pattern | Codex.Grep(
+  ; Call Grep with all parameters
+  pattern | Grep(
     File: file-path
     CaseInsensitive: case-insensitive
     LineNumbers: line-numbers
