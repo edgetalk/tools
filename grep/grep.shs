@@ -1,0 +1,172 @@
+@wire(grep {
+  ExpectTable = args
+  args:pattern | ExpectString = pattern
+  args:file | ExpectString = file-path
+  
+  ; Optional parameters with defaults
+  args:case_insensitive | If(Is(true) {true} {false}) = case-insensitive
+  args:line_numbers | If(Is(true) {true} {false}) = line-numbers
+  args:before_context | If(IsNone {0} {ExpectInt}) = before-context
+  args:after_context | If(IsNone {0} {ExpectInt}) = after-context
+  args:multiline | If(Is(true) {true} {false}) = multiline
+  args:invert_match | If(Is(true) {true} {false}) = invert-match
+  args:max_matches | If(IsNone {0} {ExpectInt}) = max-matches
+  
+  ; Call Codex.Grep with all parameters
+  pattern | Codex.Grep(
+    File: file-path
+    CaseInsensitive: case-insensitive
+    LineNumbers: line-numbers
+    BeforeContext: before-context
+    AfterContext: after-context
+    MultiLine: multiline
+    InvertMatch: invert-match
+    MaxMatches: max-matches
+  ) = results
+  
+  ; Format results
+  [] >= formatted-results
+  results | ForEach({
+    $0 | ExpectTable = match-info
+    
+    match-info:line | ExpectString = line-text
+    match-info:file | ExpectString = file-name
+    match-info:is_match | ExpectBool = is-match
+    
+    {
+      line: line-text
+      file: file-name
+      is_match: is-match
+    } >= result-entry
+    
+    ; Add line number if available
+    When({match-info:line_number | IsInt} {
+      match-info:line_number | ExpectInt = line-num
+      line-num | Set(result-entry "line_number")
+    })
+    
+    result-entry >> formatted-results
+  })
+  
+  {
+    success: true
+    results: formatted-results
+    file: file-path
+    pattern: pattern
+  } | ExpectTable
+})
+
+{
+  definition: {
+    name: "grep"
+    description: """Search for regex patterns in files using powerful ripgrep functionality.
+
+The grep tool allows you to search for text patterns in files using regular expressions. It supports various options for case sensitivity, line numbers, context lines, multiline matching, and more.
+
+Basic usage:
+- pattern: The regex pattern to search for
+- file: The file path to search in
+
+Options:
+- case_insensitive (bool): Enable case-insensitive search (default: false)
+- line_numbers (bool): Include line numbers in results (default: true)
+- before_context (int): Number of lines to show before each match (default: 0)
+- after_context (int): Number of lines to show after each match (default: 0)
+- multiline (bool): Enable multiline pattern matching where . matches newlines (default: false)
+- invert_match (bool): Show lines that don't match the pattern (default: false)
+- max_matches (int): Maximum number of matches to return, 0 = unlimited (default: 0)
+
+Returns:
+- success (bool): Whether the search completed successfully
+- results (sequence): Array of match objects containing:
+  - line (string): The matched or context line text
+  - file (string): The file path
+  - is_match (bool): true for actual matches, false for context lines
+  - line_number (int, optional): Line number if line_numbers is true
+- file (string): The file that was searched
+- pattern (string): The pattern that was used
+
+Examples:
+
+1. Simple search:
+{
+  "pattern": "function",
+  "file": "src/main.js"
+}
+
+2. Case-insensitive search with context:
+{
+  "pattern": "error",
+  "file": "logs/app.log",
+  "case_insensitive": true,
+  "before_context": 2,
+  "after_context": 2
+}
+
+3. Multiline pattern search:
+{
+  "pattern": "class.*\\{[\\s\\S]*?constructor",
+  "file": "src/App.js",
+  "multiline": true
+}
+
+4. Limit results:
+{
+  "pattern": "TODO",
+  "file": "src/utils.js",
+  "max_matches": 10
+}
+"""
+    parameters: {
+      type: "object"
+      properties: {
+        pattern: {
+          type: "string"
+          description: "The regex pattern to search for"
+        }
+        file: {
+          type: "string"
+          description: "The file path to search in"
+        }
+        case_insensitive: {
+          type: "boolean"
+          description: "Enable case-insensitive search (default: false)"
+        }
+        line_numbers: {
+          type: "boolean"
+          description: "Include line numbers in results (default: true)"
+        }
+        before_context: {
+          type: "integer"
+          description: "Number of lines to show before each match (default: 0)"
+        }
+        after_context: {
+          type: "integer"
+          description: "Number of lines to show after each match (default: 0)"
+        }
+        multiline: {
+          type: "boolean"
+          description: "Enable multiline pattern matching (default: false)"
+        }
+        invert_match: {
+          type: "boolean"
+          description: "Show lines that don't match the pattern (default: false)"
+        }
+        max_matches: {
+          type: "integer"
+          description: "Maximum number of matches to return, 0 = unlimited (default: 0)"
+        }
+      }
+      required: ["pattern" "file"]
+    }
+  }
+  
+  use: grep
+}
+
+; {
+;   pattern: "case_insensitive|line_numbers"
+;   file: "instructions.md"
+;   case_insensitive: true
+;   line_numbers: true
+; } | Do(grep) | Log
