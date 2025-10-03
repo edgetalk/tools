@@ -1,0 +1,102 @@
+@wire(ssh-shell-cmd-inner {
+  = input-table
+  
+  When({
+      Get(g/globals "ssh/session" Global: true Default: {}) | Is({}) | Or
+      Get(g/globals "ssh/host" Global: true Default: "") | IsNot(env:ssh-host) | Or
+      Get(g/globals "ssh/user" Global: true Default: "") | IsNot(env:ssh-user) | Or
+      Get(g/globals "ssh/password" Global: true Default: "") | IsNot(env:ssh-password) | Or
+      Get(g/globals "ssh/port" Global: true Default: "") | IsNot(env:ssh-port)
+    } {
+      Msg("Connecting to SSH server")
+      env:ssh-host | ExpectString | Set(g/globals "ssh/host" Global: true) | Log("SSH host") = ssh-host
+      env:ssh-user | ExpectString | Set(g/globals "ssh/user" Global: true) | Log("SSH user") = ssh-user
+      env:ssh-password | ExpectString | Set(g/globals "ssh/password" Global: true) = ssh-password
+      env:ssh-port | ExpectString | Set(g/globals "ssh/port" Global: true) | Log("SSH port") = ssh-port
+      {
+        session: (SSH.Connect(Host: ssh-host User: ssh-user Password: ssh-password Port: (ssh-port | ToInt)))
+      } | ExpectTable | Set(g/globals "ssh/session" Global: true)
+    }
+  )
+  
+  Get(g/globals "ssh/session" Global: true Default: {}) | Take("session")
+  Expect(@type(Type::Object ObjectName: "SSH.Shell")) >= ssh-session
+  WhenNot(SSH.IsConnected {
+    {} | Set(g/globals "ssh/session" Global: true)
+    input-table | Restart
+  })
+  
+  ; Check if this is an interactive input or a new command
+  input-table:input_str | If(IsNone {
+      ; New command execution
+      input-table:cmd | ExpectString | SSH.Execute(Session: ssh-session)
+    } {
+      ; Interactive input
+      ExpectString | SSH.SendInput(Session: ssh-session)
+    }
+  )
+  {
+    status: (Take("status") | ExpectString)
+    output: (Take("output") | ExpectString)
+  }
+})
+
+@wire(ssh-shell-cmd {
+  ExpectTable | Do(ssh-shell-cmd-inner)
+})
+
+{
+  definition: {
+    name: "ssh_shell_cmd"
+    description: """* Execute a shell command through SSH or interact with a running command.
+* This tool uses an existing SSH connection that is already opened and kept alive by the user (available in env:ssh-session).
+* All commands are executed in the same persistent SSH shell session, maintaining state, environment variables, and working directory between calls.
+* Interactive mode: If a command requires user input, it will pause and return with 'status': 'requires_interaction'.
+* To interact with a paused command:
+  - Use this same tool with only the 'input_str' parameter (omit 'cmd')
+  - Send empty input_str to just check current output without sending input
+  - Send a new command with 'cmd' to cancel the interactive session and start a new command
+* Please avoid commands that may produce a very large amount of output."""
+    parameters: {
+      type: "object"
+      properties: {
+        cmd: {
+          type: "string"
+          description: "The shell command to execute. Required when starting a new command. Omit this when you want to interact with an already running command."
+        }
+        input_str: {
+          type: "string"
+          description: "Input string to send to an interactive command that is waiting for input. When provided, any 'cmd' parameter will be ignored. Leave empty to just check the current output without sending input."
+        }
+      }
+      required: []
+    }
+  }
+  
+  use: ssh-shell-cmd
+}
+
+; @wire(test {
+;   "localhost" | Set(env "ssh-host")
+;   "testuser" | Set(env "ssh-user")
+;   "test123" | Set(env "ssh-password")
+;   "2222" | Set(env "ssh-port")
+  
+;   {
+;     cmd: "ls -la"
+;   } | Do(ssh-shell-cmd) | Log
+  
+;   {
+;     cmd: "echo 'test'"
+;   } | Do(ssh-shell-cmd) | Log
+  
+;   {
+;     cmd: "echo 'test2'"
+;   } | Do(ssh-shell-cmd) | Log
+; })
+
+; Repeat({
+;   Detach(test)
+;   Wait(test)
+;   Stop(test)
+; } Times: 3)
