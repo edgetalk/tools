@@ -303,6 +303,47 @@ Repeat({
 ])
 ```
 
+**If blocks return values** - assign AFTER the closing paren:
+
+```shards
+; If returns the last value from the executed branch
+env:ssh-keypath | If(IsNotNone {
+    ExpectString | Set(g/globals "ssh/keypath" Global: true) = credential
+    "keypath" | Set(g/globals "ssh/auth-method" Global: true)
+  } {
+    env:ssh-password | ExpectString | Set(g/globals "ssh/password" Global: true) = credential
+    "password" | Set(g/globals "ssh/auth-method" Global: true)
+  }
+) = auth-method   ; Assign the returned value here
+
+; This captures "keypath" or "password" in auth-method
+```
+
+**Passthrough parameter** - controls output (applies to If, Match, Cond, Maybe):
+
+```shards
+; Passthrough: true (default) - outputs the INPUT of the shard
+; Passthrough: false - outputs the result from the executed branch
+
+value | If(condition {
+    "branch-result"
+  } {
+    "other-result"
+  } Passthrough: true)    ; Outputs: value (the input)
+
+value | If(condition {
+    "branch-result"
+  } {
+    "other-result"
+  } Passthrough: false)   ; Outputs: "branch-result" or "other-result"
+
+; Common use case: Get result from Match branches
+auth-method | Match([
+    "keypath" {SSH.Connect(Host: host User: user KeyPath: key)}
+    "password" {SSH.Connect(Host: host User: user Password: pwd)}
+  ] Passthrough: false)  ; Output is the SSH.Connect result, not auth-method
+```
+
 Once block for init:
 
 ```shards

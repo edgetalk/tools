@@ -2,19 +2,41 @@
   = input-table
   
   When({
+      env:ssh-password | If(IsNone {""} ExpectString) = ssh-password
+      env:ssh-keypath | If(IsNone {""} ExpectString) = ssh-keypath
+      
       Get(g/globals "ssh/session" Global: true Default: {}) | Is({}) | Or
       Get(g/globals "ssh/host" Global: true Default: "") | IsNot(env:ssh-host) | Or
       Get(g/globals "ssh/user" Global: true Default: "") | IsNot(env:ssh-user) | Or
-      Get(g/globals "ssh/password" Global: true Default: "") | IsNot(env:ssh-password) | Or
+      Get(g/globals "ssh/password" Global: true Default: "") | IsNot(ssh-password) | Or
+      Get(g/globals "ssh/keypath" Global: true Default: "") | IsNot(ssh-keypath) | Or
       Get(g/globals "ssh/port" Global: true Default: "") | IsNot(env:ssh-port)
     } {
       Msg("Connecting to SSH server")
       env:ssh-host | ExpectString | Set(g/globals "ssh/host" Global: true) | Log("SSH host") = ssh-host
       env:ssh-user | ExpectString | Set(g/globals "ssh/user" Global: true) | Log("SSH user") = ssh-user
-      env:ssh-password | ExpectString | Set(g/globals "ssh/password" Global: true) = ssh-password
       env:ssh-port | ExpectString | Set(g/globals "ssh/port" Global: true) | Log("SSH port") = ssh-port
+      
+      ; Determine auth method: prioritize keypath if provided
+      "" >= ssh-auth-credential
+      env:ssh-keypath | If({IsNotNone | And | IsNot("")} {
+          {[(Apple.iCloudPath) "/"] | String.Join > ssh-auth-credential}  ; wrapped in {} to allow passthrough of keypath
+          ExpectString | Set(g/globals "ssh/keypath" Global: true) | AppendTo(ssh-auth-credential)
+          "" | Set(g/globals "ssh/password" Global: true)
+          "keypath" | Set(g/globals "ssh/auth-method" Global: true)
+        } {
+          env:ssh-password | ExpectString | Set(g/globals "ssh/password" Global: true) > ssh-auth-credential
+          "" | Set(g/globals "ssh/keypath" Global: true)
+          "password" | Set(g/globals "ssh/auth-method" Global: true)
+        }
+      ) = auth-method
+      
       {
-        session: (SSH.Connect(Host: ssh-host User: ssh-user Password: ssh-password Port: (ssh-port | ToInt)))
+        session: (auth-method | Match([
+            "keypath" {SSH.Connect(Host: ssh-host User: ssh-user KeyPath: ssh-auth-credential Port: (ssh-port | ToInt))}
+            "password" {SSH.Connect(Host: ssh-host User: ssh-user Password: ssh-auth-credential Port: (ssh-port | ToInt))}
+          ] Passthrough: false)
+        )
       } | ExpectTable | Set(g/globals "ssh/session" Global: true)
     }
   )
