@@ -20,7 +20,7 @@
       ; Determine auth method: prioritize keypath if provided
       "" >= ssh-auth-credential
       env:ssh-keypath | If({IsNotNone | And | IsNot("")} {
-          {[(Apple.iCloudPath) "/"] | String.Join > ssh-auth-credential}  ; wrapped in {} to allow passthrough of keypath
+          {[(Apple.iCloudPath) "/"] | String.Join > ssh-auth-credential} ; wrapped in {} to allow passthrough of keypath
           ExpectString | Set(g/globals "ssh/keypath" Global: true) | AppendTo(ssh-auth-credential)
           "" | Set(g/globals "ssh/password" Global: true)
           "keypath" | Set(g/globals "ssh/auth-method" Global: true)
@@ -49,12 +49,21 @@
   })
   
   ; Check if this is an interactive input or a new command
-  input-table:input_str | If(IsNone {
-      ; New command execution
-      input-table:cmd | ExpectString | SSH.Execute(Session: ssh-session)
+  Maybe({
+      input-table:input_str | If(IsNone {
+          ; New command execution
+          input-table:cmd | ExpectString | SSH.Execute(Session: ssh-session)
+        } {
+          ; Interactive input
+          ExpectString | SSH.SendInput(Session: ssh-session)
+        }
+      ) | ExpectTable
     } {
-      ; Interactive input
-      ExpectString | SSH.SendInput(Session: ssh-session)
+      {} | Set(g/globals "ssh/session" Global: true)
+      {
+        status: "disconnected"
+        output: "Send again the same command to attempt to reconnect"
+      } | ExpectTable
     }
   )
   {
@@ -103,15 +112,15 @@
 ;   "testuser" | Set(env "ssh-user")
 ;   "test123" | Set(env "ssh-password")
 ;   "2222" | Set(env "ssh-port")
-  
+
 ;   {
 ;     cmd: "ls -la"
 ;   } | Do(ssh-shell-cmd) | Log
-  
+
 ;   {
 ;     cmd: "echo 'test'"
 ;   } | Do(ssh-shell-cmd) | Log
-  
+
 ;   {
 ;     cmd: "echo 'test2'"
 ;   } | Do(ssh-shell-cmd) | Log

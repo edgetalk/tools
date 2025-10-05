@@ -1,7 +1,7 @@
 @wire(grep {
   ExpectTable = args
   args:pattern | ExpectString = pattern
-  args:file | ExpectString = file-path
+  [(Apple.iCloudPath) "/" (args:file | ExpectString)] | String.Join = file-path
   
   ; Optional parameters with defaults
   args:case_insensitive | If(Is(true) {true} {false}) = case-insensitive
@@ -35,7 +35,7 @@
     
     {
       line: line-text
-      file: file-name
+      ; file: file-name
       is_match: is-match
     } >= result-entry
     
@@ -51,8 +51,8 @@
   {
     success: true
     results: formatted-results
-    file: file-path
-    pattern: pattern
+    ; file: file-path
+    ; pattern: pattern
   } | ExpectTable
 })
 
