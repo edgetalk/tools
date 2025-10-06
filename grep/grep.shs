@@ -2,6 +2,7 @@
   ExpectTable = args
   args:pattern | ExpectString = pattern
   [(Apple.iCloudPath) "/" (args:file | ExpectString)] | String.Join = file-path
+  ; args:file | ExpectString = file-path
   
   ; Optional parameters with defaults
   args:case_insensitive | If(Is(true) {true} {false}) = case-insensitive
@@ -11,7 +12,7 @@
   args:multiline | If(Is(true) {true} {false}) = multiline
   args:invert_match | If(Is(true) {true} {false}) = invert-match
   args:max_matches | If(IsNone {0} {ExpectInt}) = max-matches
-  
+
   ; Call Grep with all parameters
   pattern | Grep(
     File: file-path
@@ -24,36 +25,23 @@
     MaxMatches: max-matches
   ) = results
   
-  ; Format results
-  [] >= formatted-results
-  results | ForEach({
+  results | Map({
     $0 | ExpectTable = match-info
     
     match-info:line | ExpectString = line-text
     match-info:file | ExpectString = file-name
-    match-info:is_match | ExpectBool = is-match
     
-    {
-      line: line-text
-      ; file: file-name
-      is_match: is-match
-    } >= result-entry
+    "" >= entry
     
     ; Add line number if available
-    When({match-info:line_number | IsInt} {
-      match-info:line_number | ExpectInt = line-num
-      line-num | Set(result-entry "line_number")
+    If({match-info:line_number | IsInt} {
+      match-info:line_number | ExpectInt | ToString | AppendTo(entry)
+      ": " | AppendTo(entry)
     })
+    line-text | AppendTo(entry)
     
-    result-entry >> formatted-results
+    entry
   })
-  
-  {
-    success: true
-    results: formatted-results
-    ; file: file-path
-    ; pattern: pattern
-  } | ExpectTable
 })
 
 {
@@ -77,14 +65,9 @@ Options:
 - max_matches (int): Maximum number of matches to return, 0 = unlimited (default: 0)
 
 Returns:
-- success (bool): Whether the search completed successfully
-- results (sequence): Array of match objects containing:
-  - line (string): The matched or context line text
-  - file (string): The file path
-  - is_match (bool): true for actual matches, false for context lines
-  - line_number (int, optional): Line number if line_numbers is true
-- file (string): The file that was searched
-- pattern (string): The pattern that was used
+A sequence of formatted strings, one per match/context line.
+- With line_numbers (default): "line_number: line_text"
+- Without line_numbers: "line_text"
 
 Examples:
 
@@ -165,8 +148,8 @@ Examples:
 }
 
 ; {
-;   pattern: "case_insensitive|line_numbers"
-;   file: "instructions.md"
+;   pattern: "email|flight"
+;   file: "../README.md"
 ;   case_insensitive: true
 ;   line_numbers: true
 ; } | Do(grep) | Log
