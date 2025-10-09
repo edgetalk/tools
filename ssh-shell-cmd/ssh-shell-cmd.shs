@@ -1,4 +1,8 @@
 @wire(ssh-shell-cmd-inner {
+  Once({
+    false >= retrying-connection
+  })
+  
   = input-table
   
   When({
@@ -44,26 +48,35 @@
   Get(g/globals "ssh/session" Global: true Default: {}) | Take("session")
   Expect(@type(Type::Object ObjectName: "SSH.Shell")) >= ssh-session
   WhenNot(SSH.IsConnected {
-    {} | Set(g/globals "ssh/session" Global: true)
-    input-table | Restart
+    If({retrying-connection | Not} {
+        {} | Set(g/globals "ssh/session" Global: true)
+        true > retrying-connection
+        input-table | Restart
+      } {
+        "SSH connection failed" | Fail
+      }
+    )
   })
   
   ; Check if this is an interactive input or a new command
   Maybe({
       input-table:input_str | If(IsNone {
           ; New command execution
-          input-table:cmd | ExpectString | SSH.Execute(Session: ssh-session)
+          input-table:cmd | ExpectString | SSH.Execute(Session: ssh-session MaxOutputBytes: 32768)
         } {
           ; Interactive input
-          ExpectString | SSH.SendInput(Session: ssh-session)
+          ExpectString | SSH.SendInput(Session: ssh-session MaxOutputBytes: 32768)
         }
       ) | ExpectTable
     } {
-      {} | Set(g/globals "ssh/session" Global: true)
-      {
-        status: "disconnected"
-        output: "Send again the same command to attempt to reconnect"
-      } | ExpectTable
+      If({retrying-connection | Not} {
+          {} | Set(g/globals "ssh/session" Global: true)
+          true > retrying-connection
+          input-table | Restart
+        } {
+          "SSH connection failed" | Fail
+        }
+      )
     }
   )
   {

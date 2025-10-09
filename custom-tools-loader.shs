@@ -9,8 +9,12 @@
   [tool-name code] | DB.Query("INSERT OR REPLACE INTO custom_tools (name, code) VALUES (?, ?)")
 })
 
+; misc tools
 @read("youtube-captions/youtube-captions.shs") | Do(add-tool)
-@read("text-editor/text-editor.shs") | Do(add-tool)
-@read("shell-cmd/shell-cmd.shs") | Do(add-tool)
 @read("search-emails/search-emails.shs") | Do(add-tool)
 @read("roll-dice/roll-dice.shs") | Do(add-tool)
+; remote SSH tools
+@read("ssh-shell-cmd/ssh-shell-cmd.shs") | Do(add-tool)
+; local iCloud editing and such tools
+@read("codex-apply-patch/apply-patch.shs") | Do(add-tool)
+@read("grep/grep.shs") | Do(add-tool)
