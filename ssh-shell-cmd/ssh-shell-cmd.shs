@@ -21,10 +21,10 @@
       env:ssh-user | ExpectString | Set(g/conversation-globals "ssh/user" Global: true) | Log("SSH user") = ssh-user
       env:ssh-port | ExpectString | Set(g/conversation-globals "ssh/port" Global: true) | Log("SSH port") = ssh-port
       
-      ; Determine auth method: prioritize keypath if provided
+      // Determine auth method: prioritize keypath if provided
       "" >= ssh-auth-credential
       env:ssh-keypath | If({IsNotNone | And | IsNot("")} {
-          {[(Apple.iCloudPath) "/"] | String.Join > ssh-auth-credential} ; wrapped in {} to allow passthrough of keypath
+          {[(Apple.iCloudPath) "/"] | String.Join > ssh-auth-credential} // wrapped in {} to allow passthrough of keypath
           ExpectString | Set(g/conversation-globals "ssh/keypath" Global: true) | AppendTo(ssh-auth-credential)
           "" | Set(g/conversation-globals "ssh/password" Global: true)
           "keypath" | Set(g/conversation-globals "ssh/auth-method" Global: true)
@@ -53,18 +53,18 @@
         true > retrying-connection
         input-table | Restart
       } {
-        "SSH connection failed" | Fail
+        "SSH connection failed. USER ACTION REQUIRED: Configure SSH environment variables in Settings -> Customizations -> Environment variables. Required: ssh-host, ssh-user, ssh-port, and either ssh-password or ssh-keypath (relative path in edge talk iCloud folder)." | Fail
       }
     )
   })
   
-  ; Check if this is an interactive input or a new command
+  // Check if this is an interactive input or a new command
   Maybe({
       input-table:input_str | If(IsNone {
-          ; New command execution
+          // New command execution
           input-table:cmd | ExpectString | SSH.Execute(Session: ssh-session MaxOutputBytes: 32768)
         } {
-          ; Interactive input
+          // Interactive input
           ExpectString | SSH.SendInput(Session: ssh-session MaxOutputBytes: 32768)
         }
       ) | ExpectTable
@@ -74,7 +74,7 @@
           true > retrying-connection
           input-table | Restart
         } {
-          "SSH connection failed" | Fail
+          "SSH connection failed. USER ACTION REQUIRED: Configure SSH environment variables in Settings -> Customizations -> Environment variables. Required: ssh-host, ssh-user, ssh-port, and either ssh-password or ssh-keypath (relative path in edge talk iCloud folder)." | Fail
         }
       )
     }
@@ -100,7 +100,13 @@
   - Use this same tool with only the 'input_str' parameter (omit 'cmd')
   - Send empty input_str to just check current output without sending input
   - Send a new command with 'cmd' to cancel the interactive session and start a new command
-* Please avoid commands that may produce a very large amount of output."""
+* Please avoid commands that may produce a very large amount of output.
+* If SSH authentication fails, please configure the required environment variables in Settings -> Customizations -> Environment variables:
+  - ssh-host: SSH server hostname or IP address
+  - ssh-user: SSH username
+  - ssh-port: SSH port (typically 22)
+  - ssh-password: SSH password (or ssh-keypath for key-based auth)
+  - ssh-keypath: Relative path to SSH private key file in edge talk iCloud folder (alternative to password)"""
     parameters: {
       type: "object"
       properties: {
@@ -120,27 +126,29 @@
   use: ssh-shell-cmd
 }
 
-; @wire(test {
-;   "localhost" | Set(env "ssh-host")
-;   "testuser" | Set(env "ssh-user")
-;   "test123" | Set(env "ssh-password")
-;   "2222" | Set(env "ssh-port")
+/*
+@wire(test {
+  "localhost" | Set(env "ssh-host")
+  "testuser" | Set(env "ssh-user")
+  "test123" | Set(env "ssh-password")
+  "2222" | Set(env "ssh-port")
 
-;   {
-;     cmd: "ls -la"
-;   } | Do(ssh-shell-cmd) | Log
+  {
+    cmd: "ls -la"
+  } | Do(ssh-shell-cmd) | Log
 
-;   {
-;     cmd: "echo 'test'"
-;   } | Do(ssh-shell-cmd) | Log
+  {
+    cmd: "echo 'test'"
+  } | Do(ssh-shell-cmd) | Log
 
-;   {
-;     cmd: "echo 'test2'"
-;   } | Do(ssh-shell-cmd) | Log
-; })
+  {
+    cmd: "echo 'test2'"
+  } | Do(ssh-shell-cmd) | Log
+})
 
-; Repeat({
-;   Detach(test)
-;   Wait(test)
-;   Stop(test)
-; } Times: 3)
+Repeat({
+  Detach(test)
+  Wait(test)
+  Stop(test)
+} Times: 3)
+*/
