@@ -1,6 +1,6 @@
 @wire(apply-patch {
   Take("patch") | ExpectString
-  Codex.ApplyPatch(WorkDir: (Apple.iCloudPath)) = apply-patch-result
+  Codex.ApplyPatch(WorkDir: working-dir) = apply-patch-result
   apply-patch-result:success | ExpectBool = success
   If({success} {
       apply-patch-result:changes | ExpectTable

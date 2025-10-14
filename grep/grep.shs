@@ -1,7 +1,7 @@
 @wire(grep {
   ExpectTable = args
   args:pattern | ExpectString = pattern
-  [(Apple.iCloudPath) "/" (args:file | ExpectString)] | String.Join = file-path
+  [working-dir (args:file | ExpectString)] | FS.Join = file-path
   ; args:file | ExpectString = file-path
   
   ; Optional parameters with defaults
