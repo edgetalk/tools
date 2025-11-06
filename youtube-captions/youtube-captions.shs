@@ -5,10 +5,12 @@
 })
 
 @wire(youtube-captions {
-  {Take("video_id") | ExpectString = video-id}
-  {Take("language_code") | ExpectString = language-code}
+  = input
   
-  "# " >= output
+  input:video_id | ExpectString = video-id
+  input:language_code | ExpectString = language-code
+  
+  "" >= output
   
   {
     "context": {
@@ -42,32 +44,25 @@
     "racyCheckOk": false
     "contentCheckOk": false
   } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" Headers: @headers Timeout: 30)
-  Await(FromJson) | ExpectTable
-  {Take("videoDetails") | ExpectTable
-    {Take("title") | ExpectString | AppendTo(output)
-      "\n\n" | AppendTo(output)
-    }
-    {"Author: " | AppendTo(output)}
-    {Take("author") | ExpectString | AppendTo(output)
-      "\n\n" | AppendTo(output)
-    }
-    {"Description:\n" | AppendTo(output)}
-    {Take("shortDescription") | ExpectString | AppendTo(output)
-      "\n\n" | AppendTo(output)
-    }
-  }
-  {Take("captions") | ExpectTable
-    Take("playerCaptionsTracklistRenderer") | ExpectTable
-    Take("captionTracks") | ExpectSeq
-    ForEach({
-      ExpectTable
-      {Take("baseUrl") | ExpectString = base-url}
-      Take("languageCode") | ExpectString | When(Is(language-code) {
-        none | Http.Get(base-url Headers: @headers Timeout: 30) | AppendTo(output)
-        Return
-      })
+  Await(FromJson) = data
+  
+  data:videoDetails = video-details
+  [
+    "Title: " video-details:title "\n\n"
+    "Author: " video-details:author "\n\n"
+    "Description:\n" video-details:shortDescription "\n\n"
+  ] | String.Format | AppendTo(output)
+  
+  data:captions = captions
+  captions:playerCaptionsTracklistRenderer = renderer
+  renderer:captionTracks | ExpectSeq | ForEach({
+    = caption
+    caption:baseUrl | ExpectString = base-url
+    caption:languageCode | ExpectString | When(Is(language-code) {
+      none | Http.Get(base-url Headers: @headers Timeout: 30) | AppendTo(output)
+      Return // exit the ForEach
     })
-  }
+  })
   
   output
 })
@@ -95,8 +90,8 @@
   use: youtube-captions
 }
 
-; ; Test code
-; {
-;   "video_id": "JswxPY1f0lw"
-;   "language_code": "en"
-; } | Do(youtube-captions) | Log("captions")
+// // Test code
+// {
+//   "video_id": "JswxPY1f0lw"
+//   "language_code": "en"
+// } | Do(youtube-captions) | Log("captions")
