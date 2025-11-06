@@ -67,7 +67,7 @@
           // Interactive input
           ExpectString | SSH.SendInput(Session: ssh-session MaxOutputBytes: 32768)
         }
-      ) | ExpectTable
+      ) | ToAnyTable
     } {
       If({retrying-connection | Not} {
           {} | Set(g/conversation-globals "ssh/session" Global: true)
@@ -152,3 +152,4 @@ Repeat({
   Stop(test)
 } Times: 3)
 */
+
