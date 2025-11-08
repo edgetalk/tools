@@ -41,7 +41,7 @@
             "password" {SSH.Connect(Host: ssh-host User: ssh-user Password: ssh-auth-credential Port: (ssh-port | ToInt))}
           ] Passthrough: false)
         )
-      } | ExpectTable | Set(g/conversation-globals "ssh/session" Global: true)
+      } | ToAnyTable | Set(g/conversation-globals "ssh/session" Global: true)
     }
   )
   
@@ -86,7 +86,7 @@
 })
 
 @wire(ssh-shell-cmd {
-  ExpectTable | Do(ssh-shell-cmd-inner)
+  ToAnyTable | Do(ssh-shell-cmd-inner)
 })
 
 {

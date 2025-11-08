@@ -1,0 +1,140 @@
+@wire(local-shell-cmd-inner {
+  Once({
+    false >= retrying-connection
+  })
+
+  = input-table
+
+  When({
+      Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Is({}) | Or
+      Get(g/conversation-globals "local-shell/shell" Global: true Default: "") | IsNot((env:local-shell-bin | If(IsNone {""} ExpectString))) | Or
+      Get(g/conversation-globals "local-shell/working-dir" Global: true Default: "") | IsNot((env:local-shell-working-dir | If(IsNone {""} ExpectString)))
+    } {
+      Msg("Creating local shell session")
+
+      env:local-shell-bin | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
+      env:local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = working-dir
+
+      {
+        session: (
+          shell-bin | If(IsNot("") {
+              working-dir | If(IsNot("") {
+                  LocalShell.Create(Shell: shell-bin WorkingDirectory: working-dir)
+                } {
+                  LocalShell.Create(Shell: shell-bin)
+                }
+              )
+            } {
+              working-dir | If(IsNot("") {
+                  LocalShell.Create(WorkingDirectory: working-dir)
+                } {
+                  LocalShell.Create
+                }
+              )
+            }
+          )
+        )
+      } | ToAnyTable | Set(g/conversation-globals "local-shell/session" Global: true)
+    }
+  )
+
+  Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Take("session")
+  Expect(@type(Type::Object ObjectName: "LocalShell.Session")) >= local-shell-session
+  WhenNot(LocalShell.IsAlive {
+    If({retrying-connection | Not} {
+        {} | Set(g/conversation-globals "local-shell/session" Global: true)
+        true > retrying-connection
+        input-table | Restart
+      } {
+        "Local shell session failed. The shell process may have exited unexpectedly." | Fail
+      }
+    )
+  })
+
+  ; Check if this is an interactive input or a new command
+  Maybe({
+      input-table:input_str | If(IsNone {
+          ; New command execution
+          input-table:cmd | ExpectString | LocalShell.Execute(Session: local-shell-session MaxOutputBytes: 32768)
+        } {
+          ; Interactive input
+          ExpectString | LocalShell.SendInput(Session: local-shell-session MaxOutputBytes: 32768)
+        }
+      ) | ToAnyTable
+    } {
+      If({retrying-connection | Not} {
+          {} | Set(g/conversation-globals "local-shell/session" Global: true)
+          true > retrying-connection
+          input-table | Restart
+        } {
+          "Local shell command execution failed. The shell process may have exited unexpectedly." | Fail
+        }
+      )
+    }
+  )
+  {
+    status: (Take("status") | ExpectString)
+    output: (Take("output") | ExpectString)
+  }
+})
+
+@wire(local-shell-cmd {
+  ToAnyTable | Do(local-shell-cmd-inner)
+})
+
+{
+  definition: {
+    name: "local_shell_cmd"
+    description: """* Execute a shell command in a persistent local shell session or interact with a running command.
+* This tool maintains a persistent local shell session that preserves state, environment variables, and working directory between calls.
+* Interactive mode: If a command requires user input, it will pause and return with 'status': 'requires_interaction'.
+* To interact with a paused command:
+  - Use this same tool with only the 'input_str' parameter (omit 'cmd')
+  - Send empty input_str to just check current output without sending input
+  - Send a new command with 'cmd' to cancel the interactive session and start a new command
+* Please avoid commands that may produce a very large amount of output.
+* Optional environment variables (configure in Settings -> Customizations -> Environment variables):
+  - local-shell-bin: Path to shell binary (default: /bin/bash on Unix, cmd.exe on Windows)
+  - local-shell-working-dir: Initial working directory (default: current directory)"""
+    parameters: {
+      type: "object"
+      properties: {
+        cmd: {
+          type: "string"
+          description: "The shell command to execute. Required when starting a new command. Omit this when you want to interact with an already running command."
+        }
+        input_str: {
+          type: "string"
+          description: "Input string to send to an interactive command that is waiting for input. When provided, any 'cmd' parameter will be ignored. Leave empty to just check the current output without sending input."
+        }
+      }
+      required: []
+    }
+  }
+
+  use: local-shell-cmd
+}
+
+Table(env)
+@wire(test {
+  ; Test with default shell
+  {
+    cmd: "pwd"
+  } | Do(local-shell-cmd) | Log
+
+  {
+    cmd: "echo 'Hello from local shell'"
+  } | Do(local-shell-cmd) | Log
+
+  {
+    cmd: "ls -la"
+  } | Do(local-shell-cmd) | Log
+})
+
+Repeat({
+  Detach(test)
+  Wait(test)
+  Stop(test)
+} Times: 3)
+
+
