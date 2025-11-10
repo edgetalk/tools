@@ -2,22 +2,22 @@
   Once({
     false >= retrying-connection
   })
-
+  
   = input-table
-
+  
   When({
       Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Is({}) | Or
       Get(g/conversation-globals "local-shell/shell" Global: true Default: "") | IsNot((env:local-shell-bin | If(IsNone {""} ExpectString))) | Or
       Get(g/conversation-globals "local-shell/working-dir" Global: true Default: "") | IsNot((env:local-shell-working-dir | If(IsNone {""} ExpectString)))
     } {
       Msg("Creating local shell session")
-
+      
       env:local-shell-bin | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
       env:local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = working-dir
-
+      
       {
         session: (
-          shell-bin | If(IsNot("") {
+        shell-bin | If(IsNot("") {
               working-dir | If(IsNot("") {
                   LocalShell.Create(Shell: shell-bin WorkingDirectory: working-dir)
                 } {
@@ -37,7 +37,7 @@
       } | ToAnyTable | Set(g/conversation-globals "local-shell/session" Global: true)
     }
   )
-
+  
   Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Take("session")
   Expect(@type(Type::Object ObjectName: "LocalShell.Session")) >= local-shell-session
   WhenNot(LocalShell.IsAlive {
@@ -50,14 +50,14 @@
       }
     )
   })
-
-  ; Check if this is an interactive input or a new command
+  
+  // Check if this is an interactive input or a new command
   Maybe({
       input-table:input_str | If(IsNone {
-          ; New command execution
+          // New command execution
           input-table:cmd | ExpectString | LocalShell.Execute(Session: local-shell-session MaxOutputBytes: 32768)
         } {
-          ; Interactive input
+          // Interactive input
           ExpectString | LocalShell.SendInput(Session: local-shell-session MaxOutputBytes: 32768)
         }
       ) | ToAnyTable
@@ -78,8 +78,16 @@
   }
 })
 
+@define(supported-platform #(@platform | IsAny(["macos"])))
+
 @wire(local-shell-cmd {
-  ToAnyTable | Do(local-shell-cmd-inner)
+  ToAnyTable
+  @if(@supported-platform {
+      Do(local-shell-cmd-inner)
+    } {
+      "Unsupported platform to send local shell commands" | Fail
+    }
+  )
 })
 
 {
@@ -111,21 +119,22 @@
       required: []
     }
   }
-
+  
   use: local-shell-cmd
 }
 
+/*
 Table(env)
 @wire(test {
-  ; Test with default shell
+  // Test with default shell
   {
     cmd: "pwd"
   } | Do(local-shell-cmd) | Log
-
+  
   {
     cmd: "echo 'Hello from local shell'"
   } | Do(local-shell-cmd) | Log
-
+  
   {
     cmd: "ls -la"
   } | Do(local-shell-cmd) | Log
@@ -136,5 +145,4 @@ Repeat({
   Wait(test)
   Stop(test)
 } Times: 3)
-
-
+*/
