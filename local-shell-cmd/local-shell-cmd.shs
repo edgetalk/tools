@@ -13,20 +13,20 @@
       Msg("Creating local shell session")
       
       env:local-shell-bin | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
-      env:local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = working-dir
+      env:local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = shell-working-dir
       
       {
         session: (
         shell-bin | If(IsNot("") {
-              working-dir | If(IsNot("") {
-                  LocalShell.Create(Shell: shell-bin WorkingDirectory: working-dir)
+              shell-working-dir | If(IsNot("") {
+                  LocalShell.Create(Shell: shell-bin WorkingDirectory: shell-working-dir)
                 } {
                   LocalShell.Create(Shell: shell-bin)
                 }
               )
             } {
-              working-dir | If(IsNot("") {
-                  LocalShell.Create(WorkingDirectory: working-dir)
+              shell-working-dir | If(IsNot("") {
+                  LocalShell.Create(WorkingDirectory: shell-working-dir)
                 } {
                   LocalShell.Create
                 }
@@ -146,3 +146,4 @@ Repeat({
   Stop(test)
 } Times: 3)
 */
+
