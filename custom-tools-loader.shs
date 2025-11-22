@@ -3,8 +3,8 @@
   Shards.Read | Shards.Distill("new-tool") = new-tool
   WireRunner(new-tool) | ExpectTable = tool-table
   
-  tool-table:use | ExpectWire // just to assert it's a wire
-  tool-table:definition | ExpectTable | Take("name") | ExpectString = tool-name
+  tool-table.use | ExpectWire // just to assert it's a wire
+  tool-table.definition | ExpectTable | Take("name") | ExpectString = tool-name
   
   [tool-name code] | DB.Query("INSERT OR REPLACE INTO custom_tools (name, code) VALUES (?, ?)")
 })
@@ -15,5 +15,3 @@
 @read("roll-dice/roll-dice.shs") | Do(add-tool)
 // remote SSH tools
 @read("ssh-shell-cmd/ssh-shell-cmd.shs") | Do(add-tool)
-// local iCloud editing and such tools
-@read("grep/grep.shs") | Do(add-tool)

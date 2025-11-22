@@ -7,8 +7,8 @@
 @wire(youtube-captions {
   = input
   
-  input:video_id | ExpectString = video-id
-  input:language_code | ExpectString = language-code
+  input.video_id | ExpectString = video-id
+  input.language_code | ExpectString = language-code
   
   "" >= output
   
@@ -46,19 +46,19 @@
   } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" Headers: @headers Timeout: 30)
   Await(FromJson) = data
   
-  data:videoDetails = video-details
+  data.videoDetails = video-details
   [
-    "Title: " video-details:title "\n\n"
-    "Author: " video-details:author "\n\n"
-    "Description:\n" video-details:shortDescription "\n\n"
+    "Title: " video-details.title "\n\n"
+    "Author: " video-details.author "\n\n"
+    "Description:\n" video-details.shortDescription "\n\n"
   ] | String.Format | AppendTo(output)
   
-  data:captions = captions
-  captions:playerCaptionsTracklistRenderer = renderer
-  renderer:captionTracks | ExpectSeq | ForEach({
+  data.captions = captions
+  captions.playerCaptionsTracklistRenderer = renderer
+  renderer.captionTracks | ExpectSeq | ForEach({
     = caption
-    caption:baseUrl | ExpectString = base-url
-    caption:languageCode | ExpectString | When(Is(language-code) {
+    caption.baseUrl | ExpectString = base-url
+    caption.languageCode | ExpectString | When(Is(language-code) {
       none | Http.Get(base-url Headers: @headers Timeout: 30) | AppendTo(output)
       Return // exit the ForEach
     })

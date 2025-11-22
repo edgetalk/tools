@@ -7,13 +7,13 @@
   
   When({
       Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Is({}) | Or
-      Get(g/conversation-globals "local-shell/shell" Global: true Default: "") | IsNot((env:local-shell-bin | If(IsNone {""} ExpectString))) | Or
-      Get(g/conversation-globals "local-shell/working-dir" Global: true Default: "") | IsNot((env:local-shell-working-dir | If(IsNone {""} ExpectString)))
+      Get(g/conversation-globals "local-shell/shell" Global: true Default: "") | IsNot((env.local-shell-bin | If(IsNone {""} ExpectString))) | Or
+      Get(g/conversation-globals "local-shell/working-dir" Global: true Default: "") | IsNot((env.local-shell-working-dir | If(IsNone {""} ExpectString)))
     } {
       Msg("Creating local shell session")
       
-      env:local-shell-bin | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
-      env:local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = shell-working-dir
+      env.local-shell-bin | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
+      env.local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = shell-working-dir
       
       {
         session: (
@@ -53,9 +53,9 @@
   
   // Check if this is an interactive input or a new command
   Maybe({
-      input-table:input_str | If(IsNone {
+      input-table.input_str | If(IsNone {
           // New command execution
-          input-table:cmd | ExpectString | LocalShell.Execute(Session: local-shell-session MaxOutputBytes: 32768)
+          input-table.cmd | ExpectString | LocalShell.Execute(Session: local-shell-session MaxOutputBytes: 32768)
         } {
           // Interactive input
           ExpectString | LocalShell.SendInput(Session: local-shell-session MaxOutputBytes: 32768)

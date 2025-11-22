@@ -77,19 +77,19 @@
     ; Extract only relevant fields for each issue
     ExpectTable = issue
     "Issue Number: " | AppendTo(issues-text)
-    issue:number | ToString | AppendTo(issues-text)
+    issue.number | ToString | AppendTo(issues-text)
     "\nTitle: " | AppendTo(issues-text)
-    issue:title | ToString | AppendTo(issues-text)
+    issue.title | ToString | AppendTo(issues-text)
     "\nState: " | AppendTo(issues-text)
-    issue:state | ToString | AppendTo(issues-text)
+    issue.state | ToString | AppendTo(issues-text)
     "\nCreated At: " | AppendTo(issues-text)
-    issue:created_at | ToString | AppendTo(issues-text)
+    issue.created_at | ToString | AppendTo(issues-text)
     "\nUpdated At: " | AppendTo(issues-text)
-    issue:updated_at | ToString | AppendTo(issues-text)
+    issue.updated_at | ToString | AppendTo(issues-text)
     "\nAssignee: " | AppendTo(issues-text)
-    issue:assignee | ToString | AppendTo(issues-text)
+    issue.assignee | ToString | AppendTo(issues-text)
     "\nBody: " | AppendTo(issues-text)
-    issue:body | ToString | AppendTo(issues-text)
+    issue.body | ToString | AppendTo(issues-text)
     "\n\n" | AppendTo(issues-text)
   })
   
@@ -146,7 +146,7 @@
   {Take("input") | ExpectTable = input}
   {Take("token") | ExpectString = github-token}
   
-  input:command | ExpectString
+  input.command | ExpectString
   Match([
     "create_pr" {input | Do(create-pr)}
     "list_issues" {input | Do(list-issues)}
@@ -158,7 +158,7 @@
 
 @wire(github_tools {
   = github-tools-input
-  env:github-token | ExpectString = github-token
+  env.github-token | ExpectString = github-token
   {
     input: github-tools-input
     token: github-token

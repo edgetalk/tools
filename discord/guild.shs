@@ -4,10 +4,10 @@
   ExpectTable = input-table
   ; input will be a table, so we take the columns we need
   ; in this case, we need the columns we need
-  input-table:operation | ExpectString = operation
-  input-table:guild_id | ExpectString = guild-id
+  input-table.operation | ExpectString = operation
+  input-table.guild_id | ExpectString = guild-id
   
-  env:discord-token | ExpectString = discord-token
+  env.discord-token | ExpectString = discord-token
   
   "" >= output-string
   
@@ -16,7 +16,7 @@
       ["https://discord.com/api/v10/guilds/" guild-id "/members/@me"] | String.Join = url
       
       {
-        "nick": (input-table:nickname | ExpectString)
+        "nick": (input-table.nickname | ExpectString)
       } | ToJson | Http.Patch(url
         Headers: ({
             "Authorization": (["Bot " discord-token] | String.Join)

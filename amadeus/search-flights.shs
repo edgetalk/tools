@@ -4,16 +4,16 @@
       amadeus/api-token-expires-at | IsLessEqual((Time.Epoch))
     } {
       ExpectTable = input
-      input:key | ExpectString = amadeus-api-key
-      input:secret | ExpectString = amadeus-api-secret
+      input.key | ExpectString = amadeus-api-key
+      input.secret | ExpectString = amadeus-api-secret
       
       ; x-www-form-urlencoded
       ["grant_type=client_credentials&client_id=" amadeus-api-key "&client_secret=" amadeus-api-secret] | String.Join
       Http.Post("https://test.api.amadeus.com/v1/security/oauth2/token" Headers: {
         "Content-Type": "application/x-www-form-urlencoded"
       }) | FromJson | ExpectTable = response
-      response:access_token | ExpectString | Set(amadeus/api-token Global: true)
-      response:expires_in | ExpectInt | Add((Time.Epoch)) | Set(amadeus/api-token-expires-at Global: true)
+      response.access_token | ExpectString | Set(amadeus/api-token Global: true)
+      response.expires_in | ExpectInt | Add((Time.Epoch)) | Set(amadeus/api-token-expires-at Global: true)
       amadeus/api-token
     }
   )
@@ -22,12 +22,12 @@
 
 @wire(find-flights {
   ExpectTable = input
-  input:origin | ExpectString = origin
-  input:destination | ExpectString = destination
-  input:departure-date | ExpectString = departure-date
-  input:return-date | ExpectString = return-date
-  env:amadeus-currency-code | ExpectString = currency-code
-  env:amadeus-cabin-class | ExpectString = cabin-class
+  input.origin | ExpectString = origin
+  input.destination | ExpectString = destination
+  input.departure-date | ExpectString = departure-date
+  input.return-date | ExpectString = return-date
+  env.amadeus-currency-code | ExpectString = currency-code
+  env.amadeus-cabin-class | ExpectString = cabin-class
   
   {
     "X-HTTP-Method-Override": "GET"

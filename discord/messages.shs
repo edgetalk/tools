@@ -4,10 +4,10 @@
   ExpectTable = input-table
   ; input will be a table, so we take the columns we need
   ; in this case, we need the columns we need
-  input-table:operation | ExpectString = operation
-  input-table:channel_id | ExpectString = channel-id
+  input-table.operation | ExpectString = operation
+  input-table.channel_id | ExpectString = channel-id
   
-  env:discord-token | ExpectString = discord-token
+  env.discord-token | ExpectString = discord-token
   
   "" >= output-string
   
@@ -16,13 +16,13 @@
       ["https://discord.com/api/v10/channels/" channel-id "/messages"] | String.Join = url
       
       Table(params)
-      input-table:limit | When(IsInt {
+      input-table.limit | When(IsInt {
         ExpectInt | ToString | Set(params "limit")
       })
-      input-table:after | When(IsString {
+      input-table.after | When(IsString {
         ExpectString | Set(params "after")
       })
-      input-table:before | When(IsString {
+      input-table.before | When(IsString {
         ExpectString | Set(params "before")
       })
       
@@ -40,25 +40,25 @@
         
         "[" | AppendTo(output-string)
         2 | Pow(22) | BigInt = two-to-the-twenty-second
-        message:id | ExpectString | BigInt | BigInt.Divide(two-to-the-twenty-second)
+        message.id | ExpectString | BigInt | BigInt.Divide(two-to-the-twenty-second)
         BigInt.ToInt | Add(@discord-epoch-time) | Div(1000) | Date.Format("%a %b %d %Y %H:%M:%S") | AppendTo(output-string)
         "] " | AppendTo(output-string)
         
-        message:author | ExpectTable = author
-        author:username | ExpectString
+        message.author | ExpectTable = author
+        author.username | ExpectString
         AppendTo(output-string)
         " (" | AppendTo(output-string)
-        author:id | ExpectString
+        author.id | ExpectString
         AppendTo(output-string)
         ")" | AppendTo(output-string)
         ": " | AppendTo(output-string)
-        message:content | ExpectString
+        message.content | ExpectString
         AppendTo(output-string)
         "\n" | AppendTo(output-string)
       })
     }
     "send_message" {
-      input-table:message | ExpectString = message
+      input-table.message | ExpectString = message
       ["https://discord.com/api/v10/channels/" channel-id "/messages"] | String.Join = url
       {
         "content": message

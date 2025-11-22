@@ -5,11 +5,11 @@
   {Take("to") | ExpectString = to}
   
   Time.Epoch | Date.Format("%Y-%m-%d") = date
-  env:aviationstack-api-key | ExpectString = api-key
+  env.aviationstack-api-key | ExpectString = api-key
   
   ["https://api.aviationstack.com/v1/flights?access_key=" api-key "&dep_iata=" from "&arr_iata=" to] | String.Join = url
   none | Http.Get(url Timeout: 30) | Log("flight-info") | Await(FromJson) | ExpectTable = flight-info
-  flight-info:data | ExpectSeq >= flights
+  flight-info.data | ExpectSeq >= flights
   
   ; remove flights that are not on today's date
   Remove(From: flights Predicate: {

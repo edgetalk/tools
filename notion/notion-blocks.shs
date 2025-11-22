@@ -1,8 +1,8 @@
 @define(process-block {
   ".block=" | AppendTo(output-string)
-  block:id | ExpectString | AppendTo(output-string) = current-block-id
+  block.id | ExpectString | AppendTo(output-string) = current-block-id
   " .type=" | AppendTo(output-string)
-  block:type | ExpectString | AppendTo(output-string) = block-type
+  block.type | ExpectString | AppendTo(output-string) = block-type
   "\n" | AppendTo(output-string)
   
   block-type | Cond([
@@ -20,7 +20,7 @@
       "---" | AppendTo(output-string)
     }
     {Is("child_page")} {
-      block:has_children | ExpectBool | When(IsTrue {
+      block.has_children | ExpectBool | When(IsTrue {
         {
           block-id: current-block-id
           api-key: api-key
@@ -98,10 +98,10 @@
 
 @wire(notion-blocks {
   ExpectTable = input
-  input:command | ExpectString = command
-  input:block-id | ExpectString = block-id
+  input.command | ExpectString = command
+  input.block-id | ExpectString = block-id
   
-  env:notion-api-key | ExpectString = api-key
+  env.notion-api-key | ExpectString = api-key
   
   "" >= output-string
   command | Match([
@@ -120,11 +120,11 @@
     }
     "append" {
       ["https://api.notion.com/v1/blocks/" block-id "/children"] | String.Join >= url
-      When({input:after | IsString} {
+      When({input.after | IsString} {
         "?after=" | AppendTo(url)
-        input:after | ExpectString | AppendTo(url)
+        input.after | ExpectString | AppendTo(url)
       })
-      input:content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
+      input.content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
           "Authorization": (["Bearer " api-key] | String.Join)
           "Notion-Version": "2022-06-28"
           "Content-Type": "application/json"
@@ -133,7 +133,7 @@
     }
     "update" {
       ["https://api.notion.com/v1/blocks/" block-id] | String.Join >= url
-      input:content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
+      input.content | ExpectString | Http.Patch(url Timeout: 30 Headers: ({
           "Authorization": (["Bearer " api-key] | String.Join)
           "Notion-Version": "2022-06-28"
           "Content-Type": "application/json"
