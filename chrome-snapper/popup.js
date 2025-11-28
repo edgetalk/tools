@@ -1,5 +1,5 @@
 // Load saved settings
-chrome.storage.sync.get(['endpoint', 'textMessage', 'hidden'], (result) => {
+chrome.storage.sync.get(['endpoint', 'textMessage', 'hidden', 'captureMode'], (result) => {
   if (result.endpoint) {
     document.getElementById('endpoint').value = result.endpoint;
   }
@@ -9,6 +9,9 @@ chrome.storage.sync.get(['endpoint', 'textMessage', 'hidden'], (result) => {
   if (result.hidden !== undefined) {
     document.getElementById('hidden').checked = result.hidden;
   }
+  if (result.captureMode) {
+    document.querySelector(`input[name="captureMode"][value="${result.captureMode}"]`).checked = true;
+  }
 });
 
 // Handle capture button click
@@ -16,6 +19,7 @@ document.getElementById('capture').addEventListener('click', async () => {
   const endpoint = document.getElementById('endpoint').value.trim();
   const textMessage = document.getElementById('textMessage').value.trim();
   const hidden = document.getElementById('hidden').checked;
+  const captureMode = document.querySelector('input[name="captureMode"]:checked').value;
   const statusDiv = document.getElementById('status');
   const captureBtn = document.getElementById('capture');
 
@@ -33,7 +37,7 @@ document.getElementById('capture').addEventListener('click', async () => {
   }
 
   // Save settings
-  chrome.storage.sync.set({ endpoint, textMessage, hidden });
+  chrome.storage.sync.set({ endpoint, textMessage, hidden, captureMode });
 
   // Append /send-messages to the endpoint
   const fullEndpoint = endpoint.replace(/\/$/, '') + '/send-messages';
@@ -52,12 +56,16 @@ document.getElementById('capture').addEventListener('click', async () => {
       tabId: tab.id,
       endpoint: fullEndpoint,
       textMessage: textMessage,
-      hidden: hidden
+      hidden: hidden,
+      captureMode: captureMode
     }, (response) => {
       captureBtn.disabled = false;
 
       if (response && response.success) {
-        showStatus(`Success! Sent ${response.tileCount} tiles`, 'success');
+        const msg = response.mode === 'text'
+          ? 'Success! Sent page content as markdown'
+          : `Success! Sent ${response.tileCount} tiles`;
+        showStatus(msg, 'success');
       } else {
         showStatus(`Error: ${response?.error || 'Unknown error'}`, 'error');
       }

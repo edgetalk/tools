@@ -2,9 +2,17 @@
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'captureFullPage') {
-    captureFullPage(message.tabId, message.endpoint, message.textMessage, message.hidden)
-      .then(result => sendResponse(result))
-      .catch(error => sendResponse({ success: false, error: error.message }));
+    const captureMode = message.captureMode || 'screenshot';
+
+    if (captureMode === 'text') {
+      captureTextMode(message.tabId, message.endpoint, message.textMessage, message.hidden)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+    } else {
+      captureFullPage(message.tabId, message.endpoint, message.textMessage, message.hidden)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+    }
 
     // Return true to indicate async response
     return true;
@@ -125,6 +133,68 @@ async function captureFullPage(tabId, endpoint, textMessage, hidden) {
     console.error('Capture error:', error);
     throw error;
   }
+}
+
+async function captureTextMode(tabId, endpoint, textMessage, hidden) {
+  try {
+    // Inject Turndown library first, then content script
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['turndown.js']
+    });
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content.js']
+    });
+
+    // Extract page content as markdown
+    const result = await sendMessageToTab(tabId, { action: 'extractPageContent' });
+
+    if (!result.success) {
+      throw new Error('Failed to extract page content');
+    }
+
+    let markdown = result.markdown;
+
+    // Prepend user's text message if provided
+    if (textMessage) {
+      markdown = `${textMessage}\n\n---\n\n${markdown}`;
+    }
+
+    // Send to endpoint as single message
+    const payload = [{
+      text: markdown,
+      hidden: hidden
+    }];
+
+    await sendToEndpoint(endpoint, payload);
+
+    return {
+      success: true,
+      mode: 'text'
+    };
+
+  } catch (error) {
+    console.error('Text capture error:', error);
+    throw error;
+  }
+}
+
+async function sendToEndpoint(endpoint, payload) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  return response;
 }
 
 async function sendTilesToEndpoint(endpoint, tiles) {

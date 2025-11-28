@@ -37,8 +37,27 @@
       width: auto;
     }
     .checkbox-group label {
+      display: inline;
       margin: 0;
       font-weight: normal;
+    }
+    .radio-group {
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .radio-group .radio-label {
+      font-weight: bold;
+      margin-right: 4px;
+    }
+    .radio-group input[type="radio"] {
+      margin: 0;
+    }
+    .radio-group label {
+      display: inline;
+      font-weight: normal;
+      margin: 0;
     }
     button {
       width: 100%;
@@ -94,6 +113,14 @@
   <div class="checkbox-group">
     <input type="checkbox" id="hidden">
     <label for="hidden">Hidden message</label>
+  </div>
+
+  <div class="radio-group">
+    <label class="radio-label">Mode:</label>
+    <input type="radio" id="modeScreenshot" name="captureMode" value="screenshot" checked>
+    <label for="modeScreenshot">Screenshot</label>
+    <input type="radio" id="modeText" name="captureMode" value="text">
+    <label for="modeText">Text</label>
   </div>
 
   <button id="capture">Capture & Send</button>
