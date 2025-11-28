@@ -4,62 +4,57 @@
   <meta charset="UTF-8">
   <title>edge talk Snapper</title>
   <style>
+    * {
+      box-sizing: border-box;
+    }
     body {
-      width: 300px;
+      width: 320px;
       padding: 15px;
       font-family: Arial, sans-serif;
       font-size: 14px;
+      margin: 0;
     }
     h3 {
-      margin: 0 0 10px 0;
+      margin: 0 0 15px 0;
       font-size: 16px;
     }
-    label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: bold;
+    .form-group {
+      margin-bottom: 12px;
     }
-    input[type="text"] {
+    .form-group > label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+    .form-group input[type="text"] {
       width: 100%;
       padding: 8px;
-      margin-bottom: 10px;
       border: 1px solid #ccc;
       border-radius: 4px;
-      box-sizing: border-box;
+      font-size: 14px;
     }
-    .checkbox-group {
-      margin-bottom: 15px;
-      display: flex;
-      align-items: center;
-    }
-    .checkbox-group input[type="checkbox"] {
-      margin-right: 8px;
-      width: auto;
-    }
-    .checkbox-group label {
-      display: inline;
-      margin: 0;
-      font-weight: normal;
-    }
-    .radio-group {
-      margin-bottom: 15px;
+    .inline-group {
       display: flex;
       align-items: center;
       gap: 8px;
+      margin-bottom: 12px;
     }
-    .radio-group .radio-label {
+    .inline-group input[type="checkbox"],
+    .inline-group input[type="radio"] {
+      margin: 0;
+      cursor: pointer;
+    }
+    .inline-group label {
+      cursor: pointer;
+      user-select: none;
+    }
+    .inline-group .group-label {
       font-weight: bold;
-      margin-right: 4px;
-    }
-    .radio-group input[type="radio"] {
-      margin: 0;
-    }
-    .radio-group label {
-      display: inline;
-      font-weight: normal;
-      margin: 0;
+      font-size: 12px;
     }
     button {
+      display: block;
       width: 100%;
       padding: 10px;
       background-color: #4285f4;
@@ -68,7 +63,6 @@
       border-radius: 4px;
       cursor: pointer;
       font-size: 14px;
-      margin-bottom: 5px;
     }
     button:hover {
       background-color: #357ae8;
@@ -99,24 +93,71 @@
       color: #0c5460;
       display: block;
     }
+    .section {
+      border-top: 1px solid #ddd;
+      margin-top: 15px;
+      padding-top: 15px;
+    }
+    .section-title {
+      font-weight: bold;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .ws-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .ws-row input[type="text"] {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .ws-row button {
+      width: auto;
+      padding: 8px 16px;
+    }
+    .ws-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .ws-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: #dc3545;
+    }
+    .ws-dot.connected {
+      background-color: #28a745;
+    }
   </style>
 </head>
 <body>
   <h3>edge talk Snapper</h3>
 
-  <label for="endpoint">Server Address:</label>
-  <input type="text" id="endpoint" placeholder="http://192.168.50.166:33053">
+  <div class="form-group">
+    <label>Server Address</label>
+    <input type="text" id="endpoint" placeholder="http://192.168.50.166:33053">
+  </div>
 
-  <label for="textMessage">Text Message (optional):</label>
-  <input type="text" id="textMessage" placeholder="Enter message...">
+  <div class="form-group">
+    <label>Text Message (optional)</label>
+    <input type="text" id="textMessage" placeholder="Enter message...">
+  </div>
 
-  <div class="checkbox-group">
+  <div class="inline-group">
     <input type="checkbox" id="hidden">
     <label for="hidden">Hidden message</label>
   </div>
 
-  <div class="radio-group">
-    <label class="radio-label">Mode:</label>
+  <div class="inline-group">
+    <span class="group-label">Mode:</span>
     <input type="radio" id="modeScreenshot" name="captureMode" value="screenshot" checked>
     <label for="modeScreenshot">Screenshot</label>
     <input type="radio" id="modeText" name="captureMode" value="text">
@@ -126,6 +167,18 @@
   <button id="capture">Capture & Send</button>
 
   <div id="status"></div>
+
+  <div class="section">
+    <div class="section-title">WebSocket Automation</div>
+    <div class="ws-status">
+      <span class="ws-dot" id="wsStatusDot"></span>
+      <span id="wsStatusText">Disconnected</span>
+    </div>
+    <div class="ws-row">
+      <input type="text" id="wsUrl" placeholder="ws://localhost:33053/ws">
+      <button id="wsConnect">Connect</button>
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

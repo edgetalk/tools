@@ -1,6 +1,304 @@
 // Background service worker for capture orchestration
 
+// ============================================================
+// WebSocket Automation
+// ============================================================
+
+let ws = null;
+let wsUrl = null;
+let reconnectAttempts = 0;
+let reconnectTimeout = null;
+let isConnecting = false;
+
+// Initialize WebSocket connection from stored URL
+chrome.storage.sync.get(['wsUrl'], (result) => {
+  if (result.wsUrl) {
+    wsUrl = result.wsUrl;
+    connectWebSocket();
+  }
+});
+
+// Listen for tab updates to notify server
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      sendWsMessage({
+        type: 'tabUpdate',
+        tabId: tab.id,
+        url: tab.url,
+        title: tab.title
+      });
+    } catch (e) {
+      console.error('Error getting tab info:', e);
+    }
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (ws && ws.readyState === WebSocket.OPEN && changeInfo.status === 'complete') {
+    sendWsMessage({
+      type: 'tabUpdate',
+      tabId: tabId,
+      url: tab.url,
+      title: tab.title
+    });
+  }
+});
+
+function connectWebSocket() {
+  if (!wsUrl || isConnecting) return;
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+
+  isConnecting = true;
+  console.log('Connecting to WebSocket:', wsUrl);
+
+  try {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = async () => {
+      console.log('WebSocket connected');
+      isConnecting = false;
+      reconnectAttempts = 0;
+
+      // Notify popup of connection status
+      broadcastConnectionStatus(true);
+
+      // Send connected message with active tab info
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) {
+          sendWsMessage({
+            type: 'connected',
+            tabId: tab.id,
+            url: tab.url,
+            title: tab.title
+          });
+        }
+      } catch (e) {
+        sendWsMessage({ type: 'connected' });
+      }
+    };
+
+    ws.onmessage = async (event) => {
+      try {
+        const command = JSON.parse(event.data);
+        await handleWsCommand(command);
+      } catch (e) {
+        console.error('Error handling WebSocket message:', e);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      isConnecting = false;
+      ws = null;
+      broadcastConnectionStatus(false);
+      scheduleReconnect();
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      isConnecting = false;
+    };
+
+  } catch (e) {
+    console.error('Failed to create WebSocket:', e);
+    isConnecting = false;
+    scheduleReconnect();
+  }
+}
+
+function disconnectWebSocket() {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+  reconnectAttempts = 0;
+
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  broadcastConnectionStatus(false);
+}
+
+function scheduleReconnect() {
+  if (!wsUrl) return;
+
+  // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+  reconnectAttempts++;
+
+  console.log(`Scheduling reconnect in ${delay}ms (attempt ${reconnectAttempts})`);
+
+  reconnectTimeout = setTimeout(() => {
+    reconnectTimeout = null;
+    connectWebSocket();
+  }, delay);
+}
+
+function sendWsMessage(message) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+  }
+}
+
+function broadcastConnectionStatus(connected) {
+  chrome.runtime.sendMessage({
+    action: 'wsStatusUpdate',
+    connected: connected
+  }).catch(() => {
+    // Popup might not be open, ignore
+  });
+}
+
+async function handleWsCommand(command) {
+  const { type, requestId, tabId } = command;
+
+  try {
+    let result;
+
+    switch (type) {
+      case 'getElements':
+        result = await executeInTab(tabId, 'getInteractiveElements', {});
+        break;
+
+      case 'getContent':
+        result = await executeInTab(tabId, 'extractPageContent', {});
+        break;
+
+      case 'click':
+        if (command.selector) {
+          result = await executeInTab(tabId, 'clickElement', { selector: command.selector });
+        } else if (command.x !== undefined && command.y !== undefined) {
+          result = await executeInTab(tabId, 'clickElement', { x: command.x, y: command.y });
+        } else {
+          result = { success: false, error: 'No selector or coordinates provided' };
+        }
+        break;
+
+      case 'type':
+        result = await executeInTab(tabId, 'typeText', {
+          text: command.text,
+          selector: command.selector
+        });
+        break;
+
+      case 'navigate':
+        if (command.url) {
+          await chrome.tabs.update(tabId, { url: command.url });
+          result = { success: true };
+        } else {
+          result = { success: false, error: 'No URL provided' };
+        }
+        break;
+
+      case 'screenshot':
+        result = await captureTabScreenshot(tabId);
+        break;
+
+      default:
+        result = { success: false, error: 'Unknown command type: ' + type };
+    }
+
+    sendWsMessage({
+      type: 'result',
+      requestId: requestId,
+      ...result
+    });
+
+  } catch (e) {
+    sendWsMessage({
+      type: 'result',
+      requestId: requestId,
+      success: false,
+      error: e.message
+    });
+  }
+}
+
+async function executeInTab(tabId, action, params) {
+  // Inject scripts if needed
+  await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    files: ['interaction.js']
+  });
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    files: ['turndown.js']
+  });
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    files: ['content.js']
+  });
+
+  // Send message to content script
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, { action, ...params }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(response);
+      }
+    });
+  });
+}
+
+async function captureTabScreenshot(tabId) {
+  try {
+    // Make sure the tab is active
+    await chrome.tabs.update(tabId, { active: true });
+
+    // Wait a moment for tab to be ready
+    await sleep(100);
+
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, {
+      format: 'jpeg',
+      quality: 85
+    });
+
+    const base64Data = dataUrl.split(',')[1];
+    return { success: true, image: base64Data };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ============================================================
+// Message Handler (Popup + WebSocket control)
+// ============================================================
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // WebSocket control messages from popup
+  if (message.action === 'wsConnect') {
+    wsUrl = message.url;
+    chrome.storage.sync.set({ wsUrl: wsUrl });
+    disconnectWebSocket();
+    connectWebSocket();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.action === 'wsDisconnect') {
+    wsUrl = null;
+    chrome.storage.sync.remove('wsUrl');
+    disconnectWebSocket();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.action === 'wsStatus') {
+    sendResponse({
+      connected: ws && ws.readyState === WebSocket.OPEN,
+      url: wsUrl
+    });
+    return true;
+  }
+
+  // Original capture functionality
   if (message.action === 'captureFullPage') {
     const captureMode = message.captureMode || 'screenshot';
 

@@ -106,4 +106,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true, markdown: markdown });
     return true;
   }
+
+  else if (message.action === 'getInteractiveElements') {
+    // Get all interactive elements using InteractionScripts
+    if (typeof InteractionScripts === 'undefined') {
+      sendResponse({ success: false, error: 'InteractionScripts not loaded' });
+      return true;
+    }
+
+    try {
+      const elements = InteractionScripts.getInteractiveElements();
+      sendResponse({ success: true, elements: elements });
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+    return true;
+  }
+
+  else if (message.action === 'clickElement') {
+    if (typeof InteractionScripts === 'undefined') {
+      sendResponse({ success: false, error: 'InteractionScripts not loaded' });
+      return true;
+    }
+
+    try {
+      let result;
+      if (message.selector) {
+        result = InteractionScripts.clickBySelector(message.selector);
+      } else if (message.x !== undefined && message.y !== undefined) {
+        result = InteractionScripts.clickByCoordinates(message.x, message.y);
+      } else {
+        result = { success: false, error: 'No selector or coordinates provided' };
+      }
+      sendResponse(result);
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+    return true;
+  }
+
+  else if (message.action === 'typeText') {
+    if (typeof InteractionScripts === 'undefined') {
+      sendResponse({ success: false, error: 'InteractionScripts not loaded' });
+      return true;
+    }
+
+    try {
+      const result = InteractionScripts.typeText(message.text, message.selector || null);
+      sendResponse(result);
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+    return true;
+  }
 });

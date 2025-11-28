@@ -89,3 +89,78 @@ function showStatus(message, type) {
   statusDiv.textContent = message;
   statusDiv.className = type;
 }
+
+// ============================================================
+// WebSocket Controls
+// ============================================================
+
+const wsUrlInput = document.getElementById('wsUrl');
+const wsConnectBtn = document.getElementById('wsConnect');
+const wsStatusDot = document.getElementById('wsStatusDot');
+const wsStatusText = document.getElementById('wsStatusText');
+
+let isWsConnected = false;
+
+// Load saved WebSocket URL and get current status
+chrome.storage.sync.get(['wsUrl'], (result) => {
+  if (result.wsUrl) {
+    wsUrlInput.value = result.wsUrl;
+  }
+});
+
+// Get initial connection status
+chrome.runtime.sendMessage({ action: 'wsStatus' }, (response) => {
+  if (response) {
+    updateWsStatus(response.connected);
+    if (response.url) {
+      wsUrlInput.value = response.url;
+    }
+  }
+});
+
+// Listen for status updates from background
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'wsStatusUpdate') {
+    updateWsStatus(message.connected);
+  }
+});
+
+function updateWsStatus(connected) {
+  isWsConnected = connected;
+
+  if (connected) {
+    wsStatusDot.classList.add('connected');
+    wsStatusText.textContent = 'Connected';
+    wsConnectBtn.textContent = 'Disconnect';
+  } else {
+    wsStatusDot.classList.remove('connected');
+    wsStatusText.textContent = 'Disconnected';
+    wsConnectBtn.textContent = 'Connect';
+  }
+}
+
+wsConnectBtn.addEventListener('click', () => {
+  if (isWsConnected) {
+    // Disconnect
+    chrome.runtime.sendMessage({ action: 'wsDisconnect' }, (response) => {
+      updateWsStatus(false);
+    });
+  } else {
+    // Connect
+    const url = wsUrlInput.value.trim();
+    if (!url) {
+      showStatus('Please enter a WebSocket URL', 'error');
+      return;
+    }
+
+    // Validate URL format
+    if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+      showStatus('URL must start with ws:// or wss://', 'error');
+      return;
+    }
+
+    chrome.runtime.sendMessage({ action: 'wsConnect', url: url }, (response) => {
+      // Status will be updated via wsStatusUpdate message
+    });
+  }
+});
