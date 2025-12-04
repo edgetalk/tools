@@ -1,0 +1,86 @@
+// Fetch the full content of an email by its message ID.
+// Returns the complete email body (plain text preferred, falls back to HTML).
+
+// Gmail uses URL-safe base64 (- and _ instead of + and /)
+// Convert to standard base64 before decoding
+@template(url-safe-base64-decode [] {
+  Replace(["-"] "+") | Replace(["_"] "/") | FromBase64 | BytesToString
+})
+
+@wire(get-email-inner {
+  = input
+  input.message-id | ExpectString = message-id
+  input.account-index | If(IsInt ExpectInt {1}) | Google.Auth = google-token
+  
+  {
+    "Authorization": (["Bearer " google-token] | String.Join)
+    "Accept": "application/json"
+  } = headers
+  
+  "" >= plain-body
+  "" >= html-body
+  
+  ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = url
+  {format: "full"} | Http.Get(url Headers: headers)
+  Await(FromJson) | ExpectTable = message
+  
+  message.payload | ExpectTable = payload
+  
+  // Simple message (no parts) - body directly on payload
+  payload | Take("body") | When(IsTable {
+    ExpectTable | Take("data") | When(IsString {
+      ExpectString | @url-safe-base64-decode > plain-body
+    })
+  })
+  
+  // Multipart message - iterate through parts
+  payload.parts | When(IsSeq {
+    ExpectSeq | ForEach({
+      $0.mimeType
+      When(Is("text/plain") {
+        $0.body | When(IsTable {
+          ExpectTable | Take("data") | When(IsString {
+            ExpectString | @url-safe-base64-decode > plain-body
+            Return // we are good with plain just exit
+          })
+        })
+      })
+      When(Is("text/html") {
+        $0.body | When(IsTable {
+          ExpectTable | Take("data") | When(IsString {
+            ExpectString | @url-safe-base64-decode > html-body // our second choice
+          })
+        })
+      })
+    })
+  })
+  
+  If({Count(plain-body) | Is(0)} {html-body | Markdown.FromHTML} {plain-body})
+} Pure: true)
+
+@wire(get-email {
+  Do(get-email-inner)
+})
+
+{
+  definition: {
+    name: "get_email"
+    description: "Fetch the full body content of an email by its message ID. Use this after search_emails to read the actual email content."
+    parameters: {
+      type: "object"
+      properties: {
+        message-id: {
+          type: "string"
+          description: "The message ID returned from search_emails (the 'ID' field in search results)."
+        }
+        account-index: {
+          type: "integer"
+          description: "The index of the gmail account to use (Users can have multiple gmail accounts setup). Default is 1 (first account), 0 and less is invalid."
+        }
+      }
+      required: ["message-id"]
+    }
+  }
+  
+  use: get-email
+}

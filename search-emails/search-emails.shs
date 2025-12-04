@@ -1,10 +1,10 @@
-; Notice that we support multiple accounts, in this case we're using the first account.
-; If you want to use a different account, you can change the index and add multiple versions of this tool.
+// Notice that we support multiple accounts, in this case we're using the first account.
+// If you want to use a different account, you can change the index and add multiple versions of this tool.
 
 @wire(search-emails-inner {
-  {Take("query") | ExpectString = query}
-  
-  1 | Google.Auth = google-token
+  = input
+  input.query | ExpectString = query
+  input.account-index | If(IsInt ExpectInt {1}) | Google.Auth = google-token
   
   {
     "Authorization": (["Bearer " google-token] | String.Join)
@@ -14,30 +14,29 @@
   "" >= emails
   
   {
-    maxResults: "15" ; limit to 15 results
+    maxResults: "15" // limit to 15 results
     q: query
-    orderBy: "date" ; order by date
-  } | Log("query") | Http.Get("https://gmail.googleapis.com/gmail/v1/users/me/messages" Headers: headers)
+    orderBy: "date" // order by date
+  } | Http.Get("https://gmail.googleapis.com/gmail/v1/users/me/messages" Headers: headers)
   Await(FromJson) | ExpectTable | Take("messages")
   When(IsSeq {
     ExpectSeq
     ForEach({
-      ExpectTable
-      {Take("id") | ExpectString = message-id}
-      {Take("threadId") | ExpectString = thread-id}
+      $0.id | ExpectString = message-id
+      $0.threadId | ExpectString = thread-id
+      
       "" >= subject
       "" >= from
       "" >= date
       ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = url
-      {format: "metadata"} | Http.Get(url Headers: headers) | Log("email")
-      Await(FromJson) | ExpectTable
-      {Take("snippet") | ExpectString = snippet}
-      Take("payload") | ExpectTable
-      Take("headers") | ExpectSeq
+      {format: "metadata"} | Http.Get(url Headers: headers)
+      Await(FromJson) = message
+      message.snippet | ExpectString = snippet
+      message.payload | ExpectTable | Take("headers") | ExpectSeq
       ForEach({
-        ExpectTable
-        {Take("name") | ExpectString = header-name}
-        {Take("value") | ExpectString = header-value}
+        $0.name | ExpectString = header-name
+        $0.value | ExpectString = header-value
+        
         header-name | When(Is("Subject") {
           header-value > subject
         })
@@ -70,7 +69,7 @@
 
 {
   definition: {
-    name: "search_emails_1"
+    name: "search_emails"
     description: "Search for emails in the user's inbox."
     parameters: {
       type: "object"
@@ -78,6 +77,10 @@
         query: {
           type: "string"
           description: "The query in google gmail search syntax to search for. e.g. 'is:unread label:inbox newer_than:2d OR (is:important label:inbox newer_than:2d)'"
+        }
+        account-index: {
+          type: "integer"
+          description: "The index of the gmail account to use (Users can have multiple gmail accounts setup). Default is 1 (first account), 0 and less is invalid."
         }
       }
       required: ["query"]
