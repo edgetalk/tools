@@ -6,14 +6,14 @@
   = input-table
   
   When({
-      Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Is({}) | Or
-      Get(g/conversation-globals "local-shell/shell" Global: true Default: "") | IsNot((env.local-shell-bin | If(IsNone {""} ExpectString))) | Or
-      Get(g/conversation-globals "local-shell/working-dir" Global: true Default: "") | IsNot((env.local-shell-working-dir | If(IsNone {""} ExpectString)))
+      Get(g/globals "local-shell/session" Global: true Default: {}) | Is({}) | Or
+      Get(g/globals "local-shell/shell" Global: true Default: "") | IsNot((env.local-shell-bin | If(IsNone {""} ExpectString))) | Or
+      Get(g/globals "local-shell/working-dir" Global: true Default: "") | IsNot((env.local-shell-working-dir | If(IsNone {""} ExpectString)))
     } {
       Msg("Creating local shell session")
       
-      env.local-shell-bin | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
-      env.local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/conversation-globals "local-shell/working-dir" Global: true) | Log("Working directory") = shell-working-dir
+      env.local-shell-bin | If(IsNone {""} ExpectString) | Set(g/globals "local-shell/shell" Global: true) | Log("Local shell binary") = shell-bin
+      env.local-shell-working-dir | If(IsNone {""} ExpectString) | Set(g/globals "local-shell/working-dir" Global: true) | Log("Working directory") = shell-working-dir
       
       {
         session: (
@@ -34,15 +34,15 @@
             }
           )
         )
-      } | ToAnyTable | Set(g/conversation-globals "local-shell/session" Global: true)
+      } | ToAnyTable | Set(g/globals "local-shell/session" Global: true)
     }
   )
   
-  Get(g/conversation-globals "local-shell/session" Global: true Default: {}) | Take("session")
+  Get(g/globals "local-shell/session" Global: true Default: {}) | Take("session")
   Expect(@type(Type::Object ObjectName: "LocalShell.Session")) >= local-shell-session
   WhenNot(LocalShell.IsAlive {
     If({retrying-connection | Not} {
-        {} | Set(g/conversation-globals "local-shell/session" Global: true)
+        {} | Set(g/globals "local-shell/session" Global: true)
         true > retrying-connection
         input-table | Restart
       } {
@@ -63,7 +63,7 @@
       ) | ToAnyTable
     } {
       If({retrying-connection | Not} {
-          {} | Set(g/conversation-globals "local-shell/session" Global: true)
+          {} | Set(g/globals "local-shell/session" Global: true)
           true > retrying-connection
           input-table | Restart
         } {
