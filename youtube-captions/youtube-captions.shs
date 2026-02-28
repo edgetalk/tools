@@ -1,92 +1,181 @@
-@define(headers {
+@define(android-headers {
   "Content-Type": "application/json"
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  "User-Agent": "com.google.android.youtube/19.02.39 (Linux; U; Android 14) gzip"
+  "Accept-Language": "en-US,en;q=0.9"
+})
+
+@define(web-headers {
+  "Content-Type": "application/json"
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
   "Accept-Language": "en-US,en;q=0.9"
 })
 
 @wire(youtube-captions {
   = input
-  
+
   input.video_id | ExpectString = video-id
   input.language_code | ExpectString = language-code
-  
+  input | Take("omit_captions") | If(IsNotNone {ExpectBool} {false}) = omit-captions
+
   "" >= output
-  
+  "" >= line-text
+  "" >= comment-token
+  0 >= comment-count
+
+  // Get video details and captions via ANDROID innertube (no API key)
   {
     "context": {
       "client": {
         "hl": "en"
-        "clientName": "WEB"
-        "clientVersion": "2.20240101.00.00"
-        "clientFormFactor": "UNKNOWN_FORM_FACTOR"
-        "clientScreen": "WATCH"
-      }
-      "user": {
-        "lockedSafetyMode": false
-      }
-      "request": {
-        "useSsl": true
-        "internalExperimentFlags": []
-        "consistencyTokenJars": []
+        "clientName": "ANDROID"
+        "clientVersion": "19.02.39"
+        "androidSdkVersion": 34
       }
     }
     "videoId": video-id
-    "playbackContext": {
-      "contentPlaybackContext": {
-        "vis": 0
-        "splay": false
-        "autoCaptionsDefaultOn": false
-        "autonavState": "STATE_NONE"
-        "html5Preference": "HTML5_PREF_WANTS"
-        "lactMilliseconds": "-1"
-      }
-    }
-    "racyCheckOk": false
-    "contentCheckOk": false
-  } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" Headers: @headers Timeout: 30)
+  } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/player" Headers: @android-headers Timeout: 30)
   Await(FromJson) = data
-  
+
   data.videoDetails = video-details
   [
     "Title: " video-details.title "\n\n"
     "Author: " video-details.author "\n\n"
     "Description:\n" video-details.shortDescription "\n\n"
   ] | String.Format | AppendTo(output)
-  
-  data.captions = captions
-  captions.playerCaptionsTracklistRenderer = renderer
-  renderer.captionTracks | ExpectSeq | ForEach({
-    = caption
-    caption.baseUrl | ExpectString = base-url
-    caption.languageCode | ExpectString | When(Is(language-code) {
-      none | Http.Get(base-url Headers: @headers Timeout: 30) | AppendTo(output)
-      Return // exit the ForEach
-    })
+
+  // Fetch captions unless omitted
+  omit-captions | WhenNot(Is(true) {
+    Maybe({
+      data.captions = captions
+      captions.playerCaptionsTracklistRenderer = renderer
+      renderer.captionTracks | ExpectSeq | ForEach({
+        = caption
+        caption.languageCode | ExpectString | When(Is(language-code) {
+          caption.baseUrl | ExpectString | String.Split("&fmt=") | Take(0) | ExpectString = base-url
+          none | Http.Get(
+            [base-url "&fmt=json3"] | String.Join
+            Headers: @android-headers
+            Timeout: 30
+          ) | Await(FromJson) | ExpectTable = caption-data
+
+          "Transcript:\n" | AppendTo(output)
+          caption-data | Take("events") | ExpectSeq | ForEach({
+            ExpectTable = event
+            event | Take("segs") | When(IsNotNone {
+              ExpectSeq = segs
+              "" > line-text
+              segs | ForEach({
+                ExpectTable | Take("utf8") | When(IsNotNone {
+                  ExpectString | AppendTo(line-text)
+                })
+              })
+              line-text | String.Trim | When(IsNot("") {
+                event | Take("tStartMs") | ExpectInt | Div(1000) | ToString = ts
+                ["[" ts "s] " line-text "\n"] | String.Format | AppendTo(output)
+              })
+            })
+          })
+          Return
+        })
+      })
+      none
+    } {none})
   })
-  
+
+  // Fetch top 10 comments via WEB innertube
+  Maybe({
+    {
+      "context": {
+        "client": {
+          "hl": "en"
+          "clientName": "WEB"
+          "clientVersion": "2.20260101.00.00"
+        }
+      }
+      "videoId": video-id
+    } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/next" Headers: @web-headers Timeout: 30)
+    Await(FromJson) | ExpectTable = next-data
+
+    // Find comment section continuation token
+    next-data | Take("contents") | ExpectTable
+    | Take("twoColumnWatchNextResults") | ExpectTable
+    | Take("results") | ExpectTable
+    | Take("results") | ExpectTable
+    | Take("contents") | ExpectSeq | ForEach({
+      ExpectTable = section-item
+      section-item | Take("itemSectionRenderer") | When(IsNotNone {
+        ExpectTable = isr
+        isr | Take("sectionIdentifier") | When(Is("comment-item-section") {
+          isr | Take("contents") | ExpectSeq | Take(0) | ExpectTable
+          | Take("continuationItemRenderer") | ExpectTable
+          | Take("continuationEndpoint") | ExpectTable
+          | Take("continuationCommand") | ExpectTable
+          | Take("token") | ExpectString > comment-token
+        })
+      })
+    })
+
+    // Fetch comments using continuation token
+    comment-token | When(IsNot("") {
+      {
+        "context": {
+          "client": {
+            "hl": "en"
+            "clientName": "WEB"
+            "clientVersion": "2.20260101.00.00"
+          }
+        }
+        "continuation": comment-token
+      } | ToJson | Http.Post("https://www.youtube.com/youtubei/v1/next" Headers: @web-headers Timeout: 30)
+      Await(FromJson) | ExpectTable = comment-data
+
+      "\nTop Comments:\n" | AppendTo(output)
+      0 > comment-count
+      comment-data | Take("frameworkUpdates") | ExpectTable
+      | Take("entityBatchUpdate") | ExpectTable
+      | Take("mutations") | ExpectSeq | ForEach({
+        ExpectTable | Take("payload") | ExpectTable
+        | Take("commentEntityPayload") | When(IsNotNone {
+          ExpectTable = cep
+          comment-count | When(IsLess(10) {
+            cep | Take("properties") | ExpectTable | Take("content") | ExpectTable
+            | Take("content") | ExpectString = comment-text
+            cep | Take("author") | ExpectTable | Take("displayName") | ExpectString = comment-author
+            [comment-author ": " comment-text "\n\n"] | String.Format | AppendTo(output)
+            Inc(comment-count)
+          })
+        })
+      })
+    })
+  } {none})
+
   output
 })
 
 {
   definition: {
     name: "youtube_captions"
-    description: "Get captions for a YouTube video in a specific language. Use this tool when the user asks you to check a YouTube video."
+    description: "Get info, captions and top comments for a YouTube video. Returns video details, timestamped transcript, and top 10 comments. Set omit_captions to true to skip the transcript."
     parameters: {
       type: "object"
       properties: {
         video_id: {
           type: "string"
-          description: "The ID of the YouTube video to get captions for."
+          description: "The ID of the YouTube video."
         }
         language_code: {
           type: "string"
-          description: "The language code of the captions to get. For example, 'en' for English or 'es' for Spanish."
+          description: "The language code for captions. For example, 'en' for English or 'es' for Spanish."
+        }
+        omit_captions: {
+          type: "boolean"
+          description: "Set to true to skip fetching the transcript. Useful when you only need video info and comments."
         }
       }
       required: ["video_id" "language_code"]
     }
   }
-  
+
   use: youtube-captions
 }
 
