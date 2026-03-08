@@ -1,0 +1,73 @@
+// Modify email labels: archive, mark read/unread, add/remove labels.
+// Gmail labels include: INBOX, UNREAD, STARRED, IMPORTANT, SPAM, TRASH, etc.
+
+@wire(modify-email-inner {
+  = input
+  input.message-id | ExpectString = message-id
+  input.account-index | If(IsInt ExpectInt {1}) | Google.Auth = google-token
+
+  {
+    "Authorization": (["Bearer " google-token] | String.Join)
+    "Content-Type": "application/json"
+  } = headers
+
+  // Build label modification payload
+  {} >= payload
+
+  input.add-labels | When(IsSeq {
+    ExpectSeq | Set(payload "addLabelIds")
+  })
+
+  input.remove-labels | When(IsSeq {
+    ExpectSeq | Set(payload "removeLabelIds")
+  })
+
+  ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id "/modify"] | String.Join = url
+  payload | Await(ToJson) | Http.Post(url Headers: headers)
+  Await(FromJson) | ExpectTable = response
+
+  response | Take("id") | When(IsString {
+    ExpectString = modified-id
+    ["Email labels modified. Message ID: " modified-id] | String.Join
+  })
+  When(IsNone {
+    "Email modified but no confirmation ID returned."
+  })
+} Pure: true)
+
+@wire(modify-email {
+  Do(modify-email-inner)
+})
+
+{
+  definition: {
+    name: "modify_email"
+    description: "Modify an email's labels. Use this to archive (remove INBOX), mark as read (remove UNREAD), mark as unread (add UNREAD), star (add STARRED), or apply any Gmail label. Common operations: archive = remove-labels [\"INBOX\"], mark read = remove-labels [\"UNREAD\"], mark unread = add-labels [\"UNREAD\"], star = add-labels [\"STARRED\"]."
+    parameters: {
+      type: "object"
+      properties: {
+        message-id: {
+          type: "string"
+          description: "The message ID of the email to modify (from search_emails results)."
+        }
+        add-labels: {
+          type: "array"
+          items: {type: "string"}
+          description: "Label IDs to add (e.g. [\"UNREAD\", \"STARRED\", \"IMPORTANT\"])."
+        }
+        remove-labels: {
+          type: "array"
+          items: {type: "string"}
+          description: "Label IDs to remove (e.g. [\"INBOX\", \"UNREAD\"]). Removing INBOX archives the email."
+        }
+        account-index: {
+          type: "integer"
+          description: "The index of the gmail account to use (Users can have multiple gmail accounts setup). Default is 1 (first account), 0 and less is invalid."
+        }
+      }
+      required: ["message-id"]
+    }
+  }
+
+  use: modify-email
+}

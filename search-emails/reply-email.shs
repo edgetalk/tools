@@ -1,0 +1,121 @@
+// Reply to an email via Gmail API.
+// Fetches the original message headers, then sends a reply in the same thread.
+
+@template(base64-to-url-safe [] {
+  Replace(["+"] "-") | Replace(["/"] "_") | Replace(["="] "")
+})
+
+@wire(reply-email-inner {
+  = input
+  input.message-id | ExpectString = message-id
+  input.body | ExpectString = body
+  input.account-index | If(IsInt ExpectInt {1}) | Google.Auth = google-token
+
+  {
+    "Authorization": (["Bearer " google-token] | String.Join)
+    "Content-Type": "application/json"
+  } = headers
+
+  // Fetch original message metadata to get thread ID and headers for reply
+  ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = msg-url
+  {format: "metadata"} | Http.Get(msg-url Headers: headers)
+  Await(FromJson) | ExpectTable = original
+
+  original.threadId | ExpectString = thread-id
+
+  // Extract From, Subject, and Message-ID headers from original
+  "" >= orig-from
+  "" >= orig-subject
+  "" >= orig-message-id-header
+
+  original.payload | ExpectTable | Take("headers") | ExpectSeq
+  ForEach({
+    $0.name | ExpectString = header-name
+    $0.value | ExpectString = header-value
+
+    header-name | When(Is("From") {
+      header-value > orig-from
+    })
+    header-name | When(Is("Subject") {
+      header-value > orig-subject
+    })
+    header-name | When(Is("Message-ID") {
+      header-value > orig-message-id-header
+    })
+    header-name | When(Is("Message-Id") {
+      header-value > orig-message-id-header
+    })
+  })
+
+  // Reply goes to the original sender (can be overridden)
+  input.to | If(IsString ExpectString {orig-from}) = to
+
+  // Ensure subject has Re: prefix
+  orig-subject | If({String.Starts(With: "Re: ")} Pass {["Re: " orig-subject] | String.Join}) = subject
+
+  // Build RFC 2822 reply message
+  "" >= message
+  ["To: " to "\r\n"] | String.Join | AppendTo(message)
+  ["Subject: " subject "\r\n"] | String.Join | AppendTo(message)
+  "Content-Type: text/plain; charset=\"UTF-8\"\r\n" | AppendTo(message)
+
+  // Threading headers
+  Count(orig-message-id-header) | When(IsMore(0) {
+    ["In-Reply-To: " orig-message-id-header "\r\n"] | String.Join | AppendTo(message)
+    ["References: " orig-message-id-header "\r\n"] | String.Join | AppendTo(message)
+  })
+
+  "\r\n" | AppendTo(message)
+  body | AppendTo(message)
+
+  // Encode to base64url
+  message | StringToBytes | ToBase64 | @base64-to-url-safe = raw-message
+
+  // Send as reply (include threadId)
+  {raw: raw-message threadId: thread-id} | Await(ToJson)
+  Http.Post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send" Headers: headers)
+  Await(FromJson) | ExpectTable = response
+
+  response | Take("id") | When(IsString {
+    ExpectString = sent-id
+    ["Reply sent successfully. Message ID: " sent-id] | String.Join
+  })
+  When(IsNone {
+    "Reply sent but no message ID returned."
+  })
+} Pure: true)
+
+@wire(reply-email {
+  Do(reply-email-inner)
+})
+
+{
+  definition: {
+    name: "reply_email"
+    description: "Reply to an existing email. Automatically threads the reply in the same conversation and addresses it to the original sender."
+    parameters: {
+      type: "object"
+      properties: {
+        message-id: {
+          type: "string"
+          description: "The message ID of the email to reply to (from search_emails or get_email results)."
+        }
+        body: {
+          type: "string"
+          description: "The plain text body of the reply."
+        }
+        to: {
+          type: "string"
+          description: "Override the recipient. By default replies to the original sender. Optional."
+        }
+        account-index: {
+          type: "integer"
+          description: "The index of the gmail account to use (Users can have multiple gmail accounts setup). Default is 1 (first account), 0 and less is invalid."
+        }
+      }
+      required: ["message-id" "body"]
+    }
+  }
+
+  use: reply-email
+}

@@ -1,0 +1,98 @@
+// Send an email via Gmail API.
+// Constructs an RFC 2822 message, base64url-encodes it, and POSTs to Gmail.
+
+// Standard base64 to URL-safe base64 (+ → -, / → _, strip =)
+@template(base64-to-url-safe [] {
+  Replace(["+"] "-") | Replace(["/"] "_") | Replace(["="] "")
+})
+
+@wire(send-email-inner {
+  = input
+  input.to | ExpectString = to
+  input.subject | ExpectString = subject
+  input.body | ExpectString = body
+  input.cc | If(IsString ExpectString {""}) = cc
+  input.bcc | If(IsString ExpectString {""}) = bcc
+  input.account-index | If(IsInt ExpectInt {1}) | Google.Auth = google-token
+
+  {
+    "Authorization": (["Bearer " google-token] | String.Join)
+    "Content-Type": "application/json"
+  } = headers
+
+  // Build RFC 2822 message
+  "" >= message
+  ["To: " to "\r\n"] | String.Join | AppendTo(message)
+
+  Count(cc) | When(IsMore(0) {
+    ["Cc: " cc "\r\n"] | String.Join | AppendTo(message)
+  })
+
+  Count(bcc) | When(IsMore(0) {
+    ["Bcc: " bcc "\r\n"] | String.Join | AppendTo(message)
+  })
+
+  ["Subject: " subject "\r\n"] | String.Join | AppendTo(message)
+  "Content-Type: text/plain; charset=\"UTF-8\"\r\n" | AppendTo(message)
+  "\r\n" | AppendTo(message)
+  body | AppendTo(message)
+
+  // Encode to base64url
+  message | StringToBytes | ToBase64 | @base64-to-url-safe = raw-message
+
+  // Send via Gmail API
+  {raw: raw-message} | Await(ToJson)
+  Http.Post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send" Headers: headers)
+  Await(FromJson) | ExpectTable = response
+
+  response | Take("id") | When(IsString {
+    ExpectString = sent-id
+    ["Email sent successfully. Message ID: " sent-id] | String.Join
+  })
+  When(IsNone {
+    "Email sent but no message ID returned."
+  })
+} Pure: true)
+
+@wire(send-email {
+  Do(send-email-inner)
+})
+
+{
+  definition: {
+    name: "send_email"
+    description: "Send an email via Gmail. Composes and sends a new email message."
+    parameters: {
+      type: "object"
+      properties: {
+        to: {
+          type: "string"
+          description: "Recipient email address (e.g. 'user@example.com'). For multiple recipients, comma-separate them."
+        }
+        subject: {
+          type: "string"
+          description: "The email subject line."
+        }
+        body: {
+          type: "string"
+          description: "The plain text body of the email."
+        }
+        cc: {
+          type: "string"
+          description: "CC recipients (comma-separated email addresses). Optional."
+        }
+        bcc: {
+          type: "string"
+          description: "BCC recipients (comma-separated email addresses). Optional."
+        }
+        account-index: {
+          type: "integer"
+          description: "The index of the gmail account to use (Users can have multiple gmail accounts setup). Default is 1 (first account), 0 and less is invalid."
+        }
+      }
+      required: ["to" "subject" "body"]
+    }
+  }
+
+  use: send-email
+}
