@@ -11,7 +11,29 @@
 
 // misc tools
 @read("youtube-captions/youtube-captions.shs") | Do(add-tool)
-// @read("search-emails/search-emails.shs") | Do(add-tool) // This tool has an hardcoded value!!
 @read("roll-dice/roll-dice.shs") | Do(add-tool)
+
+// gmail tools
+@read("search-emails/search-emails.shs") | Do(add-tool)
+@read("search-emails/get-email.shs") | Do(add-tool)
+@read("search-emails/send-email.shs") | Do(add-tool)
+@read("search-emails/reply-email.shs") | Do(add-tool)
+@read("search-emails/trash-email.shs") | Do(add-tool)
+@read("search-emails/modify-email.shs") | Do(add-tool)
+
 // remote SSH tools
 @read("ssh-shell-cmd/ssh-shell-cmd.shs") | Do(add-tool)
+
+// // Alpha Vantage financial tools
+// @read("alpha-vantage/stock-quote.shs") | Do(add-tool)
+// @read("alpha-vantage/stock-search.shs") | Do(add-tool)
+// @read("alpha-vantage/stock-daily.shs") | Do(add-tool)
+// @read("alpha-vantage/company-overview.shs") | Do(add-tool)
+// @read("alpha-vantage/top-gainers-losers.shs") | Do(add-tool)
+// @read("alpha-vantage/news-sentiment.shs") | Do(add-tool)
+// @read("alpha-vantage/crypto-quote.shs") | Do(add-tool)
+// @read("alpha-vantage/forex-daily.shs") | Do(add-tool)
+// @read("alpha-vantage/forex-exchange-rate.shs") | Do(add-tool)
+// @read("alpha-vantage/forex-weekly.shs") | Do(add-tool)
+// @read("alpha-vantage/forex-monthly.shs") | Do(add-tool)
+// @read("alpha-vantage/forex-technicals.shs") | Do(add-tool)
