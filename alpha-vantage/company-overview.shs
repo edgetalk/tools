@@ -1,0 +1,61 @@
+// Get company fundamentals: sector, market cap, PE ratio, EPS, etc.
+
+@wire(company-overview-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.symbol | ExpectString = symbol
+
+  {function: "OVERVIEW" symbol: symbol apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable = overview
+
+  overview | Take("Symbol")
+  If(IsString {
+    [
+      "Company: " (overview | Take("Name") | ExpectString)
+      " (" (overview | Take("Symbol") | ExpectString) ")"
+      "\nDescription: " (overview | Take("Description") | ExpectString)
+      "\nSector: " (overview | Take("Sector") | ExpectString)
+      "\nIndustry: " (overview | Take("Industry") | ExpectString)
+      "\nMarket Cap: $" (overview | Take("MarketCapitalization") | ExpectString)
+      "\nPE Ratio: " (overview | Take("PERatio") | ExpectString)
+      "\nEPS: $" (overview | Take("EPS") | ExpectString)
+      "\nDividend Yield: " (overview | Take("DividendYield") | ExpectString)
+      "\n52-Week High: $" (overview | Take("52WeekHigh") | ExpectString)
+      "\n52-Week Low: $" (overview | Take("52WeekLow") | ExpectString)
+      "\nProfit Margin: " (overview | Take("ProfitMargin") | ExpectString)
+      "\nBeta: " (overview | Take("Beta") | ExpectString)
+    ] | String.Format
+  } {
+    "No company data found. Check the symbol and try again."
+  })
+})
+
+@wire(company-overview {
+  Do(company-overview-inner)
+})
+
+{
+  definition: {
+    name: "company_overview"
+    description: "Get company fundamentals including description, sector, market cap, PE ratio, EPS, dividend yield, and more."
+    parameters: {
+      type: "object"
+      properties: {
+        symbol: {
+          type: "string"
+          description: "The stock ticker symbol (e.g. 'AAPL', 'IBM')."
+        }
+      }
+      required: ["symbol"]
+    }
+  }
+
+  use: company-overview
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {symbol: "IBM"} | WireRunner(w) | Log("company-overview IBM")

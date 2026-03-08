@@ -1,0 +1,106 @@
+// Get technical indicators (SMA, EMA, RSI, MACD, BBANDS) for a forex pair.
+// The forex symbol format is FROM+TO concatenated, e.g. EURUSD, GBPJPY.
+
+@wire(forex-technicals-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.from_symbol | ExpectString = from-symbol
+  input.to_symbol | If(IsString ExpectString {"USD"}) = to-symbol
+  input.indicator | ExpectString = indicator
+  input.interval | If(IsString ExpectString {"daily"}) = interval
+  input.time_period | If(IsInt {ExpectInt | ToString} {"20"}) = time-period
+
+  [from-symbol to-symbol] | String.Join = symbol
+
+  {function: indicator symbol: symbol interval: interval time_period: time-period series_type: "close" apikey: api-key} >= params
+
+  params | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable = response
+
+  response | Take("Meta Data")
+  If(IsTable {
+    ExpectTable = meta
+    meta | Take("2: Indicator") | ExpectString = indicator-name
+
+    [indicator-name " for " symbol " (" interval ", period " time-period "):\n\n"] | String.Format >= results
+    0 >= count
+
+    // The technical analysis key varies by indicator
+    response | Take(["Technical Analysis: " indicator] | String.Join)
+    If(IsTable {
+      ExpectTable | ForEach({
+        When({count | IsLess(20)} {
+          $0 | ExpectString = date
+          $1 | ExpectTable = values
+          [date " | "] | String.Format >= line
+          values | ForEach({
+            [$0 | ExpectString ": " $1 | ExpectString "  "] | String.Format
+            AppendTo(line)
+          })
+          "\n" | AppendTo(line)
+          line | AppendTo(results)
+        })
+        Inc(count)
+      })
+    } Pass)
+    results
+  } {
+    response | Take("Information")
+    If(IsString {ExpectString} {
+      response | Take("Error Message")
+      If(IsString ExpectString {"Unknown error. Check indicator name and parameters."})
+    })
+  })
+})
+
+@wire(forex-technicals {
+  Do(forex-technicals-inner)
+})
+
+{
+  definition: {
+    name: "forex_technicals"
+    description: """Get technical indicators for a forex currency pair. Supported indicators:
+- SMA (Simple Moving Average)
+- EMA (Exponential Moving Average)
+- RSI (Relative Strength Index)
+- MACD (Moving Average Convergence/Divergence)
+- BBANDS (Bollinger Bands)
+Returns the 20 most recent data points."""
+    parameters: {
+      type: "object"
+      properties: {
+        from_symbol: {
+          type: "string"
+          description: "The source currency code (e.g. 'EUR', 'GBP', 'JPY')."
+        }
+        to_symbol: {
+          type: "string"
+          description: "The target currency code (default 'USD')."
+        }
+        indicator: {
+          type: "string"
+          description: "The technical indicator: 'SMA', 'EMA', 'RSI', 'MACD', or 'BBANDS'."
+        }
+        interval: {
+          type: "string"
+          description: "Time interval: 'daily' (default), 'weekly', or 'monthly'."
+        }
+        time_period: {
+          type: "integer"
+          description: "Number of data points for calculation (default 20). Common: 14 for RSI, 20 for SMA/BBANDS, 50/200 for long-term SMA."
+        }
+      }
+      required: ["from_symbol" "indicator"]
+    }
+  }
+
+  use: forex-technicals
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {from_symbol: "EUR" indicator: "RSI" time_period: 14} | WireRunner(w) | Log("forex-technicals RSI EUR/USD")
+; {from_symbol: "GBP" to_symbol: "JPY" indicator: "SMA"} | WireRunner(w) | Log("forex-technicals SMA GBP/JPY")

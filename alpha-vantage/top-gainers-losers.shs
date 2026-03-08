@@ -1,0 +1,69 @@
+// Get top gainers, losers, and most actively traded US stocks.
+
+@template(format-ticker-list [items label max-items] {
+  [label ":\n"] | String.Format >= section
+  0 >= idx
+  items | When(IsSeq {
+    ExpectSeq | ForEach({
+      When({idx | IsLess(max-items)} {
+        $0 | ExpectTable = item
+        [
+          "  " (item | Take("ticker") | ExpectString)
+          " | $" (item | Take("price") | ExpectString)
+          " | Change: " (item | Take("change_amount") | ExpectString)
+          " (" (item | Take("change_percentage") | ExpectString) ")"
+          " | Vol: " (item | Take("volume") | ExpectString)
+          "\n"
+        ] | String.Format
+        AppendTo(section)
+      })
+      Inc(idx)
+    })
+  })
+  section
+})
+
+@wire(top-gainers-losers-inner {
+  env.alphavantage-api-key | ExpectString = api-key
+
+  {function: "TOP_GAINERS_LOSERS" apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable = data
+
+  data | Take("top_gainers")
+  If(IsSeq {
+    "" >= output
+    @format-ticker-list((data | Take("top_gainers")) "Top Gainers" 10) | AppendTo(output)
+    "\n" | AppendTo(output)
+    @format-ticker-list((data | Take("top_losers")) "Top Losers" 10) | AppendTo(output)
+    "\n" | AppendTo(output)
+    @format-ticker-list((data | Take("most_actively_traded")) "Most Active" 10) | AppendTo(output)
+    output
+  } {
+    "No market data available. Markets may be closed."
+  })
+})
+
+@wire(top-gainers-losers {
+  Do(top-gainers-losers-inner)
+})
+
+{
+  definition: {
+    name: "top_gainers_losers"
+    description: "Get the top 10 US stock gainers, losers, and most actively traded tickers for the current trading day."
+    parameters: {
+      type: "object"
+      properties: {}
+      required: []
+    }
+  }
+
+  use: top-gainers-losers
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {} | WireRunner(w) | Log("top-gainers-losers")

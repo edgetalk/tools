@@ -1,0 +1,62 @@
+// Get real-time forex exchange rate between two currencies.
+
+@wire(forex-exchange-rate-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.from_currency | ExpectString = from-currency
+  input.to_currency | If(IsString ExpectString {"USD"}) = to-currency
+
+  {function: "CURRENCY_EXCHANGE_RATE" from_currency: from-currency to_currency: to-currency apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable | Take("Realtime Currency Exchange Rate")
+
+  If(IsTable {
+    ExpectTable = rate
+    [
+      (rate | Take("1. From_Currency Code") | ExpectString)
+      " (" (rate | Take("2. From_Currency Name") | ExpectString) ")"
+      " -> " (rate | Take("3. To_Currency Code") | ExpectString)
+      " (" (rate | Take("4. To_Currency Name") | ExpectString) ")"
+      "\nExchange Rate: " (rate | Take("5. Exchange Rate") | ExpectString)
+      "\nBid: " (rate | Take("8. Bid Price") | ExpectString)
+      "\nAsk: " (rate | Take("9. Ask Price") | ExpectString)
+      "\nLast Refreshed: " (rate | Take("6. Last Refreshed") | ExpectString)
+    ] | String.Format
+  } {
+    "No exchange rate data found. Check the currency codes and try again."
+  })
+})
+
+@wire(forex-exchange-rate {
+  Do(forex-exchange-rate-inner)
+})
+
+{
+  definition: {
+    name: "forex_exchange_rate"
+    description: "Get the real-time exchange rate between two fiat currencies (e.g. EUR to USD, GBP to JPY)."
+    parameters: {
+      type: "object"
+      properties: {
+        from_currency: {
+          type: "string"
+          description: "The source currency code (e.g. 'EUR', 'GBP', 'JPY', 'CHF')."
+        }
+        to_currency: {
+          type: "string"
+          description: "The target currency code (default 'USD')."
+        }
+      }
+      required: ["from_currency"]
+    }
+  }
+
+  use: forex-exchange-rate
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {from_currency: "EUR"} | WireRunner(w) | Log("forex-exchange-rate EUR/USD")
+; {from_currency: "GBP" to_currency: "JPY"} | WireRunner(w) | Log("forex-exchange-rate GBP/JPY")

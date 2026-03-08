@@ -1,0 +1,62 @@
+// Get real-time cryptocurrency exchange rate.
+
+@wire(crypto-quote-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.from_currency | ExpectString = from-currency
+  input.to_currency | If(IsString ExpectString {"USD"}) = to-currency
+
+  {function: "CURRENCY_EXCHANGE_RATE" from_currency: from-currency to_currency: to-currency apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable | Take("Realtime Currency Exchange Rate")
+
+  If(IsTable {
+    ExpectTable = rate
+    [
+      (rate | Take("1. From_Currency Code") | ExpectString)
+      " (" (rate | Take("2. From_Currency Name") | ExpectString) ")"
+      " -> " (rate | Take("3. To_Currency Code") | ExpectString)
+      " (" (rate | Take("4. To_Currency Name") | ExpectString) ")"
+      "\nExchange Rate: " (rate | Take("5. Exchange Rate") | ExpectString)
+      "\nBid: " (rate | Take("8. Bid Price") | ExpectString)
+      "\nAsk: " (rate | Take("9. Ask Price") | ExpectString)
+      "\nLast Refreshed: " (rate | Take("6. Last Refreshed") | ExpectString)
+    ] | String.Format
+  } {
+    "No exchange rate data found. Check the currency codes and try again."
+  })
+})
+
+@wire(crypto-quote {
+  Do(crypto-quote-inner)
+})
+
+{
+  definition: {
+    name: "crypto_quote"
+    description: "Get the real-time exchange rate for a cryptocurrency pair (e.g. BTC to USD, ETH to EUR)."
+    parameters: {
+      type: "object"
+      properties: {
+        from_currency: {
+          type: "string"
+          description: "The cryptocurrency code (e.g. 'BTC', 'ETH', 'SOL', 'DOGE')."
+        }
+        to_currency: {
+          type: "string"
+          description: "The target currency code (default 'USD'). Can be fiat (USD, EUR) or crypto (BTC)."
+        }
+      }
+      required: ["from_currency"]
+    }
+  }
+
+  use: crypto-quote
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {from_currency: "BTC"} | WireRunner(w) | Log("crypto-quote BTC/USD")
+; {from_currency: "ETH" to_currency: "EUR"} | WireRunner(w) | Log("crypto-quote ETH/EUR")

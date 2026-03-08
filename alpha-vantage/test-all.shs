@@ -1,0 +1,95 @@
+// Standalone test for all Alpha Vantage tools.
+// Run: ALPHAVANTAGE_API_KEY=xxx shards test-all.shs
+// Note: free key is rate-limited to 1 req/sec, so we pause between calls.
+
+{
+  alphavantage-api-key: @env("ALPHAVANTAGE_API_KEY")
+} = env
+
+@include("stock-quote.shs" Once: true)
+@include("stock-search.shs" Once: true)
+@include("stock-daily.shs" Once: true)
+@include("company-overview.shs" Once: true)
+@include("top-gainers-losers.shs" Once: true)
+@include("news-sentiment.shs" Once: true)
+@include("crypto-quote.shs" Once: true)
+@include("forex-daily.shs" Once: true)
+@include("forex-exchange-rate.shs" Once: true)
+@include("forex-weekly.shs" Once: true)
+@include("forex-monthly.shs" Once: true)
+@include("forex-technicals.shs" Once: true)
+
+@wire(test-stock-quote {
+  {symbol: "AAPL"} | Do(stock-quote) | Log("stock-quote")
+  Pause(1.5)
+})
+
+@wire(test-stock-search {
+  {keywords: "microsoft"} | Do(stock-search) | Log("stock-search")
+  Pause(1.5)
+})
+
+@wire(test-stock-daily {
+  {symbol: "MSFT"} | Do(stock-daily) | Log("stock-daily")
+  Pause(1.5)
+})
+
+@wire(test-company-overview {
+  {symbol: "IBM"} | Do(company-overview) | Log("company-overview")
+  Pause(1.5)
+})
+
+@wire(test-top-gainers-losers {
+  {} | Do(top-gainers-losers) | Log("top-gainers-losers")
+  Pause(1.5)
+})
+
+@wire(test-news-sentiment {
+  {tickers: "AAPL" limit: 3} | Do(news-sentiment) | Log("news-sentiment")
+  Pause(1.5)
+})
+
+@wire(test-crypto-quote {
+  {from_currency: "BTC"} | Do(crypto-quote) | Log("crypto-quote")
+  Pause(1.5)
+})
+
+@wire(test-forex-daily {
+  {from_symbol: "EUR"} | Do(forex-daily) | Log("forex-daily")
+  Pause(1.5)
+})
+
+@wire(test-forex-exchange-rate {
+  {from_currency: "EUR"} | Do(forex-exchange-rate) | Log("forex-exchange-rate")
+  Pause(1.5)
+})
+
+@wire(test-forex-weekly {
+  {from_symbol: "GBP"} | Do(forex-weekly) | Log("forex-weekly")
+  Pause(1.5)
+})
+
+@wire(test-forex-monthly {
+  {from_symbol: "JPY"} | Do(forex-monthly) | Log("forex-monthly")
+  Pause(1.5)
+})
+
+@wire(test-forex-technicals {
+  {from_symbol: "EUR" to_symbol: "USD" indicator: "RSI" time_period: 14} | Do(forex-technicals) | Log("forex-technicals RSI")
+  Pause(1.5)
+  {from_symbol: "GBP" to_symbol: "JPY" indicator: "BBANDS" time_period: 20} | Do(forex-technicals) | Log("forex-technicals BBANDS")
+})
+
+SwitchTo(test-stock-quote)
+SwitchTo(test-stock-search)
+SwitchTo(test-stock-daily)
+SwitchTo(test-company-overview)
+SwitchTo(test-top-gainers-losers)
+SwitchTo(test-news-sentiment)
+SwitchTo(test-crypto-quote)
+SwitchTo(test-forex-daily)
+SwitchTo(test-forex-exchange-rate)
+SwitchTo(test-forex-weekly)
+SwitchTo(test-forex-monthly)
+SwitchTo(test-forex-technicals)
+Msg("--- All tests done ---")

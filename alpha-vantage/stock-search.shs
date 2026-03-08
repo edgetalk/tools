@@ -1,0 +1,60 @@
+// Search for stock symbols by keywords.
+
+@wire(stock-search-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.keywords | ExpectString = keywords
+
+  {function: "SYMBOL_SEARCH" keywords: keywords apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable | Take("bestMatches")
+
+  If(IsSeq {
+    ExpectSeq
+    {"" >= results}
+    ForEach({
+      $0 | ExpectTable = match
+      [
+        (match | Take("1. symbol") | ExpectString)
+        " - " (match | Take("2. name") | ExpectString)
+        " (" (match | Take("3. type") | ExpectString)
+        ", " (match | Take("4. region") | ExpectString)
+        ", " (match | Take("8. currency") | ExpectString) ")"
+        "\n"
+      ] | String.Format
+      AppendTo(results)
+    })
+    results
+  } {
+    "No matches found."
+  })
+})
+
+@wire(stock-search {
+  Do(stock-search-inner)
+})
+
+{
+  definition: {
+    name: "stock_search"
+    description: "Search for stock ticker symbols by company name or keywords. Returns matching symbols with company name, type, and region."
+    parameters: {
+      type: "object"
+      properties: {
+        keywords: {
+          type: "string"
+          description: "Search keywords (e.g. 'microsoft', 'tesla', 'apple')."
+        }
+      }
+      required: ["keywords"]
+    }
+  }
+
+  use: stock-search
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {keywords: "microsoft"} | WireRunner(w) | Log("stock-search microsoft")

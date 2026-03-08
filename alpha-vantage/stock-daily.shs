@@ -1,0 +1,76 @@
+// Get daily OHLCV time series for a stock symbol.
+
+@wire(stock-daily-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.symbol | ExpectString = symbol
+  input.outputsize | If(IsString ExpectString {"compact"}) = outputsize
+
+  {function: "TIME_SERIES_DAILY" symbol: symbol outputsize: outputsize apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable = response
+
+  response | Take("Meta Data")
+  If(IsTable {
+    ExpectTable | Take("2. Symbol") | ExpectString = sym-name
+    response | Take("Time Series (Daily)") | ExpectTable = series
+
+    ["Daily prices for " sym-name ":\n\n"] | String.Format >= results
+    0 >= count
+    series | ForEach({
+      // limit output to 20 most recent entries
+      When({count | IsLess(20)} {
+        $0 | ExpectString = date
+        $1 | ExpectTable = day
+        [
+          date
+          " | Open: $" (day | Take("1. open") | ExpectString)
+          " | High: $" (day | Take("2. high") | ExpectString)
+          " | Low: $" (day | Take("3. low") | ExpectString)
+          " | Close: $" (day | Take("4. close") | ExpectString)
+          " | Vol: " (day | Take("5. volume") | ExpectString)
+          "\n"
+        ] | String.Format
+        AppendTo(results)
+      })
+      Inc(count)
+    })
+    results
+  } {
+    "No daily data found. Check the symbol and try again."
+  })
+})
+
+@wire(stock-daily {
+  Do(stock-daily-inner)
+})
+
+{
+  definition: {
+    name: "stock_daily"
+    description: "Get daily historical stock prices (open, high, low, close, volume). Returns up to 20 most recent trading days by default."
+    parameters: {
+      type: "object"
+      properties: {
+        symbol: {
+          type: "string"
+          description: "The stock ticker symbol (e.g. 'AAPL', 'MSFT')."
+        }
+        outputsize: {
+          type: "string"
+          description: "Data size: 'compact' (last 100 days, default) or 'full' (20+ years)."
+        }
+      }
+      required: ["symbol"]
+    }
+  }
+
+  use: stock-daily
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {symbol: "MSFT"} | WireRunner(w) | Log("stock-daily MSFT")
+; {symbol: "TSLA" outputsize: "compact"} | WireRunner(w) | Log("stock-daily TSLA compact")

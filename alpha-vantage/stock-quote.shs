@@ -1,0 +1,58 @@
+// Get real-time stock quote (price, change, volume) for a given symbol.
+
+@wire(stock-quote-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.symbol | ExpectString = symbol
+
+  {function: "GLOBAL_QUOTE" symbol: symbol apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable | Take("Global Quote")
+
+  If(IsTable {
+    ExpectTable = q
+    [
+      "Symbol: " (q | Take("01. symbol") | ExpectString)
+      "\nPrice: $" (q | Take("05. price") | ExpectString)
+      "\nChange: " (q | Take("09. change") | ExpectString)
+      " (" (q | Take("10. change percent") | ExpectString) ")"
+      "\nOpen: $" (q | Take("02. open") | ExpectString)
+      "\nHigh: $" (q | Take("03. high") | ExpectString)
+      "\nLow: $" (q | Take("04. low") | ExpectString)
+      "\nVolume: " (q | Take("06. volume") | ExpectString)
+      "\nPrev Close: $" (q | Take("08. previous close") | ExpectString)
+      "\nLatest Trading Day: " (q | Take("07. latest trading day") | ExpectString)
+    ] | String.Format
+  } {
+    "No quote data found. Check the symbol and try again."
+  })
+})
+
+@wire(stock-quote {
+  Do(stock-quote-inner)
+})
+
+{
+  definition: {
+    name: "stock_quote"
+    description: "Get the current stock price, change, and volume for a ticker symbol (e.g. AAPL, MSFT, TSLA). Requires alphavantage-api-key environment variable."
+    parameters: {
+      type: "object"
+      properties: {
+        symbol: {
+          type: "string"
+          description: "The stock ticker symbol (e.g. 'AAPL', 'MSFT', 'GOOGL')."
+        }
+      }
+      required: ["symbol"]
+    }
+  }
+
+  use: stock-quote
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {symbol: "AAPL"} | WireRunner(w) | Log("stock-quote AAPL")

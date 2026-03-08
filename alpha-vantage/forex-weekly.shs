@@ -1,0 +1,73 @@
+// Get weekly forex exchange rate data for a currency pair.
+
+@wire(forex-weekly-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+  input.from_symbol | ExpectString = from-symbol
+  input.to_symbol | If(IsString ExpectString {"USD"}) = to-symbol
+
+  {function: "FX_WEEKLY" from_symbol: from-symbol to_symbol: to-symbol apikey: api-key}
+  | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable = response
+
+  response | Take("Meta Data")
+  If(IsTable {
+    ExpectTable | Take("2. From Symbol") | ExpectString = from-name
+    response | Take("Time Series FX (Weekly)") | ExpectTable = series
+
+    [from-name "/" to-symbol " Weekly Forex:\n\n"] | String.Format >= results
+    0 >= count
+    series | ForEach({
+      When({count | IsLess(20)} {
+        $0 | ExpectString = date
+        $1 | ExpectTable = day
+        [
+          date
+          " | Open: " (day | Take("1. open") | ExpectString)
+          " | High: " (day | Take("2. high") | ExpectString)
+          " | Low: " (day | Take("3. low") | ExpectString)
+          " | Close: " (day | Take("4. close") | ExpectString)
+          "\n"
+        ] | String.Format
+        AppendTo(results)
+      })
+      Inc(count)
+    })
+    results
+  } {
+    "No forex data found. Check the currency codes and try again."
+  })
+})
+
+@wire(forex-weekly {
+  Do(forex-weekly-inner)
+})
+
+{
+  definition: {
+    name: "forex_weekly"
+    description: "Get weekly forex (foreign exchange) rates for a currency pair. Returns up to 20 most recent weeks."
+    parameters: {
+      type: "object"
+      properties: {
+        from_symbol: {
+          type: "string"
+          description: "The source currency code (e.g. 'EUR', 'GBP', 'JPY')."
+        }
+        to_symbol: {
+          type: "string"
+          description: "The target currency code (default 'USD')."
+        }
+      }
+      required: ["from_symbol"]
+    }
+  }
+
+  use: forex-weekly
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {from_symbol: "EUR"} | WireRunner(w) | Log("forex-weekly EUR/USD")

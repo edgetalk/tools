@@ -1,0 +1,78 @@
+// Get market news with sentiment analysis, optionally filtered by tickers or topics.
+
+@wire(news-sentiment-inner {
+  = input
+  env.alphavantage-api-key | ExpectString = api-key
+
+  {function: "NEWS_SENTIMENT" apikey: api-key} >= params
+  input.tickers | When(IsString {
+    ExpectString | Set(params "tickers")
+  })
+  input.topics | When(IsString {
+    ExpectString | Set(params "topics")
+  })
+  input.limit | If(IsInt {ExpectInt | ToString} {"10"}) | Set(params "limit")
+
+  params | Http.Get("https://www.alphavantage.co/query")
+  | Await(FromJson) | ExpectTable | Take("feed")
+
+  If(IsSeq {
+    ExpectSeq
+    {"" >= results}
+    ForEach({
+      $0 | ExpectTable = article
+      [
+        "Title: " (article | Take("title") | ExpectString)
+        "\nSource: " (article | Take("source") | ExpectString)
+        "\nPublished: " (article | Take("time_published") | ExpectString)
+        "\nSentiment: " (article | Take("overall_sentiment_label") | ExpectString)
+        " (" (article | Take("overall_sentiment_score") | ExpectString) ")"
+        "\nSummary: " (article | Take("summary") | ExpectString)
+        "\nURL: " (article | Take("url") | ExpectString)
+        "\n\n"
+      ] | String.Format
+      AppendTo(results)
+    })
+    results
+  } {
+    "No news articles found."
+  })
+})
+
+@wire(news-sentiment {
+  Do(news-sentiment-inner)
+})
+
+{
+  definition: {
+    name: "news_sentiment"
+    description: "Get market news with AI sentiment analysis. Can filter by ticker symbols and/or topics (e.g. technology, earnings, ipo, mergers_and_acquisitions, financial_markets, economy_fiscal, economy_monetary, economy_macro, energy, finance, real_estate, retail_wholesale)."
+    parameters: {
+      type: "object"
+      properties: {
+        tickers: {
+          type: "string"
+          description: "Comma-separated ticker symbols to filter news (e.g. 'AAPL,MSFT'). Optional."
+        }
+        topics: {
+          type: "string"
+          description: "Comma-separated topics to filter (e.g. 'technology,earnings'). Optional."
+        }
+        limit: {
+          type: "integer"
+          description: "Number of articles to return (default 10, max 1000)."
+        }
+      }
+      required: []
+    }
+  }
+
+  use: news-sentiment
+}
+
+; @env("alphavantage-api-key")
+; Log = tool
+; tool:use | ExpectWire = w
+
+; {tickers: "AAPL" limit: 3} | WireRunner(w) | Log("news-sentiment AAPL")
+; {topics: "technology" limit: 3} | WireRunner(w) | Log("news-sentiment technology")
