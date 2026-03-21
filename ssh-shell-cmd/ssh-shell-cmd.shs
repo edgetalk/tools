@@ -2,13 +2,25 @@
   Once({
     false >= retrying-connection
   })
-  
+
   = input-table
-  
+
+  // Check if conversation changed — invalidate session if so
+  Get(g/globals "conversation-id" Global: true Default: "") = current-convo-id
+  When({
+      current-convo-id | IsNot("") | And
+      Get(g/globals "ssh/conversation-id" Global: true Default: "") | IsNot(current-convo-id)
+    } {
+      Msg("Conversation changed, invalidating SSH session")
+      {} | Set(g/globals "ssh/session" Global: true)
+      current-convo-id | Set(g/globals "ssh/conversation-id" Global: true)
+    }
+  )
+
   When({
       env.ssh-password | If(IsNone {""} ExpectString) = ssh-password
       env.ssh-keypath | If(IsNone {""} ExpectString) = ssh-keypath
-      
+
       Get(g/globals "ssh/session" Global: true Default: {}) | Is({}) | Or
       Get(g/globals "ssh/host" Global: true Default: "") | IsNot(env.ssh-host) | Or
       Get(g/globals "ssh/user" Global: true Default: "") | IsNot(env.ssh-user) | Or
@@ -20,7 +32,7 @@
       env.ssh-host | ExpectString | Set(g/globals "ssh/host" Global: true) | Log("SSH host") = ssh-host
       env.ssh-user | ExpectString | Set(g/globals "ssh/user" Global: true) | Log("SSH user") = ssh-user
       env.ssh-port | ExpectString | Set(g/globals "ssh/port" Global: true) | Log("SSH port") = ssh-port
-      
+
       // Determine auth method: prioritize keypath if provided
       "" >= ssh-auth-credential
       env.ssh-keypath | If({IsNotNone | And | IsNot("")} {
@@ -34,17 +46,18 @@
           "password" | Set(g/globals "ssh/auth-method" Global: true)
         }
       ) = auth-method
-      
+
       {
         session: (auth-method | Match([
-            "keypath" {SSH.Connect(Host: ssh-host User: ssh-user KeyPath: ssh-auth-credential Port: (ssh-port | ToInt))}
-            "password" {SSH.Connect(Host: ssh-host User: ssh-user Password: ssh-auth-credential Port: (ssh-port | ToInt))}
+            "keypath" {SSH.Connect(Host: ssh-host User: ssh-user KeyPath: ssh-auth-credential Port: (ssh-port | ToInt) Rows: 40 Cols: 120)}
+            "password" {SSH.Connect(Host: ssh-host User: ssh-user Password: ssh-auth-credential Port: (ssh-port | ToInt) Rows: 40 Cols: 120)}
           ] Passthrough: false)
         )
       } | ToAnyTable | Set(g/globals "ssh/session" Global: true)
+      current-convo-id | Set(g/globals "ssh/conversation-id" Global: true)
     }
   )
-  
+
   Get(g/globals "ssh/session" Global: true Default: {}) | Take("session")
   Expect(@type(Type::Object ObjectName: "SSH.Shell")) >= ssh-session
   WhenNot(SSH.IsConnected {
@@ -57,32 +70,65 @@
       }
     )
   })
-  
-  // Check if this is an interactive input or a new command
-  Maybe({
-      input-table.input_str | If(IsNone {
-          // New command execution
-          input-table.cmd | ExpectString | SSH.Execute(Session: ssh-session MaxOutputBytes: 32768)
-        } {
-          // Interactive input
-          ExpectString | SSH.SendInput(Session: ssh-session MaxOutputBytes: 32768)
-        }
-      ) | ToAnyTable
+
+  // Determine mode: raw_mode=1 for TUI/raw interaction, default for execute mode
+  input-table.raw_mode | If(IsInt ExpectInt {0}) >= raw-mode
+
+  // Handle resize if requested
+  input-table.rows | If(IsInt ExpectInt {0}) >= req-rows
+  input-table.cols | If(IsInt ExpectInt {0}) >= req-cols
+  When({req-rows | IsMore(0) | And | req-cols | IsMore(0)} {
+    SSH.Resize(Session: ssh-session Rows: req-rows Cols: req-cols)
+  })
+
+  raw-mode | If(IsMore(0) {
+      // === Raw mode: TUI/interactive applications ===
+      // cmd = start a program (append CR to submit the command)
+      input-table.cmd | When(IsString {
+        ExpectString | SSH.Write(Session: ssh-session AppendNewline: true)
+      })
+
+      // input_str = raw keystrokes (no auto CR, user controls precisely)
+      input-table.input_str | When(IsString {
+        ExpectString | SSH.Write(Session: ssh-session AppendNewline: false)
+      })
+
+      // Read output with timeout (500ms default for meaningful TUI responses)
+      input-table.timeout_ms | If(IsInt ExpectInt {500}) >= read-timeout
+      SSH.Read(Session: ssh-session StripAnsi: true Timeout: read-timeout) = raw-output
+
+      {
+        status: "raw"
+        output: raw-output
+      }
     } {
-      If({retrying-connection | Not} {
-          {} | Set(g/globals "ssh/session" Global: true)
-          true > retrying-connection
-          input-table | Restart
+      // === Execute mode: standard command execution ===
+      Maybe({
+          input-table.input_str | If(IsNone {
+              // New command execution
+              input-table.cmd | ExpectString | SSH.Execute(Session: ssh-session MaxOutputBytes: 32768)
+            } {
+              // Interactive input
+              ExpectString | SSH.SendInput(Session: ssh-session MaxOutputBytes: 32768)
+            }
+          ) | ToAnyTable
         } {
-          "SSH connection failed. USER ACTION REQUIRED: Configure SSH environment variables in Settings -> Customizations -> Environment variables. Required: ssh-host, ssh-user, ssh-port, and either ssh-password or ssh-keypath (relative path in edge talk iCloud folder)." | Fail
+          If({retrying-connection | Not} {
+              {} | Set(g/globals "ssh/session" Global: true)
+              true > retrying-connection
+              input-table | Restart
+            } {
+              "SSH connection failed. USER ACTION REQUIRED: Configure SSH environment variables in Settings -> Customizations -> Environment variables. Required: ssh-host, ssh-user, ssh-port, and either ssh-password or ssh-keypath (relative path in edge talk iCloud folder)." | Fail
+            }
+          )
         }
       )
+      {
+        status: (Take("status") | ExpectString)
+        output: (Take("output") | ExpectString)
+      }
     }
   )
-  {
-    status: (Take("status") | ExpectString)
-    output: (Take("output") | ExpectString)
-  }
 })
 
 @wire(ssh-shell-cmd {
@@ -92,37 +138,61 @@
 {
   definition: {
     name: "ssh_shell_cmd"
-    description: """* Execute a shell command through SSH or interact with a running command.
-* This tool uses an existing SSH connection that is already opened and kept alive by the user (available in env:ssh-session).
-* All commands are executed in the same persistent SSH shell session, maintaining state, environment variables, and working directory between calls.
-* Interactive mode: If a command requires user input, it will pause and return with 'status': 'requires_interaction'.
-* To interact with a paused command:
-  - Use this same tool with only the 'input_str' parameter (omit 'cmd')
-  - Send empty input_str to just check current output without sending input
-  - Send a new command with 'cmd' to cancel the interactive session and start a new command
-* Please avoid commands that may produce a very large amount of output.
-* If SSH authentication fails, please configure the required environment variables in Settings -> Customizations -> Environment variables:
-  - ssh-host: SSH server hostname or IP address
-  - ssh-user: SSH username
-  - ssh-port: SSH port (typically 22)
-  - ssh-password: SSH password (or ssh-keypath for key-based auth)
-  - ssh-keypath: Relative path to SSH private key file in edge talk iCloud folder (alternative to password)"""
+    description: """* Execute shell commands or interact with TUI applications through a persistent SSH session.
+* Preserves state, environment variables, and working directory between calls.
+
+## Execute mode (default):
+* Send a command with 'cmd' — returns when command completes or needs input.
+* If status is 'requires_interaction', use 'input_str' (omit 'cmd') to send input.
+* Send a new 'cmd' to cancel a waiting interactive command and start fresh.
+
+## Raw mode (set raw_mode=1):
+* For TUI/interactive programs like top, htop, vim, claude, etc.
+* Send 'cmd' to start a program, 'input_str' to send keystrokes, or omit both to read current output.
+* Output is stripped of ANSI codes. Use 'timeout_ms' to control read wait time.
+* Use 'rows' and 'cols' to resize the terminal.
+
+## Environment variables (Settings -> Customizations -> Environment variables):
+* ssh-host: SSH server hostname or IP address
+* ssh-user: SSH username
+* ssh-port: SSH port (typically 22)
+* ssh-password: SSH password (or ssh-keypath for key-based auth)
+* ssh-keypath: Relative path to SSH private key file in edge talk iCloud folder (alternative to password)
+
+## Notes:
+TUI apps (like `claude`, `vim`, `htop`) may take a moment to render their first frame after launch. If the first read returns empty, send a follow-up read (or a harmless keypress like `\r`) with the same `timeout_ms` to capture the rendered output. This is normal — the app is still initializing."""
     parameters: {
       type: "object"
       properties: {
         cmd: {
           type: "string"
-          description: "The shell command to execute. Required when starting a new command. Omit this when you want to interact with an already running command."
+          description: "Shell command to execute (execute mode) or TUI program to start (raw mode)."
         }
         input_str: {
           type: "string"
-          description: "Input string to send to an interactive command that is waiting for input. When provided, any 'cmd' parameter will be ignored. Leave empty to just check the current output without sending input."
+          description: "Input to send to a waiting command. In raw mode, this sends keystrokes to the TUI application."
+        }
+        raw_mode: {
+          type: "integer"
+          description: "Set to 1 for raw/TUI mode. Default 0 (execute mode). Use raw mode for interactive programs like top, vim, claude."
+        }
+        timeout_ms: {
+          type: "integer"
+          description: "Read timeout in milliseconds for raw mode (default: 500). Increase for slow-starting programs."
+        }
+        rows: {
+          type: "integer"
+          description: "Resize terminal to this many rows. Must specify both rows and cols."
+        }
+        cols: {
+          type: "integer"
+          description: "Resize terminal to this many columns. Must specify both rows and cols."
         }
       }
       required: []
     }
   }
-  
+
   use: ssh-shell-cmd
 }
 
@@ -133,17 +203,18 @@
   "test123" | Set(env "ssh-password")
   "2222" | Set(env "ssh-port")
 
-  {
-    cmd: "ls -la"
-  } | Do(ssh-shell-cmd) | Log
+  // Test execute mode
+  {cmd: "pwd"} | Do(ssh-shell-cmd) | Log
+  {cmd: "echo 'Hello from SSH'"} | Do(ssh-shell-cmd) | Log
 
-  {
-    cmd: "echo 'test'"
-  } | Do(ssh-shell-cmd) | Log
+  // Test raw mode with top
+  {cmd: "top -b -n 1 | head -20" raw_mode: 1 timeout_ms: 3000} | Do(ssh-shell-cmd) | Log("top output")
 
-  {
-    cmd: "echo 'test2'"
-  } | Do(ssh-shell-cmd) | Log
+  // Test raw mode read (peek)
+  {raw_mode: 1} | Do(ssh-shell-cmd) | Log("peek output")
+
+  // Test resize
+  {rows: 50 cols: 200 raw_mode: 1} | Do(ssh-shell-cmd) | Log("after resize")
 })
 
 Repeat({
@@ -152,4 +223,3 @@ Repeat({
   Stop(test)
 } Times: 3)
 */
-

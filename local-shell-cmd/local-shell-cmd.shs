@@ -5,6 +5,18 @@
   
   = input-table
   
+  // Check if conversation changed — invalidate session if so
+  Get(g/globals "conversation-id" Global: true Default: "") = current-convo-id
+  When({
+      current-convo-id | IsNot("") | And
+      Get(g/globals "local-shell/conversation-id" Global: true Default: "") | IsNot(current-convo-id)
+    } {
+      Msg("Conversation changed, invalidating local shell session")
+      {} | Set(g/globals "local-shell/session" Global: true)
+      current-convo-id | Set(g/globals "local-shell/conversation-id" Global: true)
+    }
+  )
+
   // Check if session needs (re)creation
   When({
       Get(g/globals "local-shell/session" Global: true Default: {}) | Is({}) | Or
@@ -36,9 +48,10 @@
           )
         )
       } | ToAnyTable | Set(g/globals "local-shell/session" Global: true)
+      current-convo-id | Set(g/globals "local-shell/conversation-id" Global: true)
     }
   )
-  
+
   Get(g/globals "local-shell/session" Global: true Default: {}) | Take("session")
   Expect(@type(Type::Object ObjectName: "LocalShell.Session")) >= local-shell-session
   WhenNot(LocalShell.IsAlive {
@@ -64,23 +77,14 @@
   
   raw-mode | If(IsMore(0) {
       // === Raw mode: TUI/interactive applications ===
-      input-table.input_str | If(IsNone {
-          // No input_str — check for cmd to start a new program, or just read
-          input-table.cmd | If(IsNone {
-              // Neither cmd nor input_str — just read current output
-              ""
-            } {
-              ExpectString
-            }
-          )
-        } {
-          ExpectString
-        }
-      ) = raw-input
-      
-      // Write input if non-empty
-      raw-input | When(IsNot("") {
-        LocalShell.Write(Session: local-shell-session AppendNewline: false)
+      // cmd = start a program (append CR to submit the command)
+      input-table.cmd | When(IsString {
+        ExpectString | LocalShell.Write(Session: local-shell-session AppendNewline: true)
+      })
+
+      // input_str = raw keystrokes (no auto CR, user controls precisely)
+      input-table.input_str | When(IsString {
+        ExpectString | LocalShell.Write(Session: local-shell-session AppendNewline: false)
       })
       
       // Read output with timeout (500ms default for meaningful TUI responses)
