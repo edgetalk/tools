@@ -1,5 +1,5 @@
-// Reply to an email via Gmail API.
-// Fetches the original message headers, then sends a reply in the same thread.
+// Reply-all to an email via Gmail API.
+// Fetches the original message headers, then sends a reply to all recipients in the same thread.
 
 @template(base64-to-url-safe [] {
   Replace(["+"] "-") | Replace(["/"] "_") | Replace(["="] "")
@@ -16,6 +16,10 @@
     "Content-Type": "application/json"
   } = headers
 
+  // Fetch current user's email address to exclude from recipients
+  Http.Get("https://gmail.googleapis.com/gmail/v1/users/me/profile" Headers: headers)
+  Await(FromJson) | ExpectTable | Take("emailAddress") | ExpectString = my-email
+
   // Fetch original message metadata to get thread ID and headers for reply
   ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = msg-url
   {format: "metadata"} | Http.Get(msg-url Headers: headers)
@@ -23,10 +27,13 @@
 
   original.threadId | ExpectString = thread-id
 
-  // Extract From, Subject, and Message-ID headers from original
+  // Extract From, Subject, Message-ID, To, Cc, and Reply-To headers from original
   "" >= orig-from
   "" >= orig-subject
   "" >= orig-message-id-header
+  "" >= orig-to
+  "" >= orig-cc
+  "" >= orig-reply-to
 
   original.payload | ExpectTable | Take("headers") | ExpectSeq
   ForEach({
@@ -45,10 +52,67 @@
     header-name | When(Is("Message-Id") {
       header-value > orig-message-id-header
     })
+    header-name | When(Is("To") {
+      header-value > orig-to
+    })
+    header-name | When(Is("Cc") {
+      header-value > orig-cc
+    })
+    header-name | When(Is("Reply-To") {
+      header-value > orig-reply-to
+    })
   })
 
-  // Reply goes to the original sender (can be overridden)
-  input.to | If(IsString ExpectString {orig-from}) = to
+  // Reply-all: "To" is the original sender (or Reply-To if present)
+  // Collect all other original To and Cc recipients into Cc, excluding ourselves
+  Count(orig-reply-to) | If(IsMore(0) {orig-reply-to} {orig-from}) = reply-to-addr
+
+  // Override To if explicitly provided, otherwise use reply-to address
+  input.to | If(IsString ExpectString {reply-to-addr}) = to
+
+  // Build match patterns for filtering: plain email and "<email>" suffix format
+  ["<" my-email ">"] | String.Join = my-email-bracket
+
+  // Build Cc list from original To and Cc, filtering out our own email and the To address
+  Sequence(cc-parts Type: @type([Type::String]))
+
+  // Template to check if an address matches a given email (plain or "Name <email>" format)
+  // Add original To recipients (may contain multiple comma-separated addresses)
+  Count(orig-to) | When(IsMore(0) {
+    orig-to | String.Split(",") | ForEach({
+      String.Trim = addr
+      // Skip empty entries
+      Count(addr) | When(IsMore(0) {
+        // Skip if this is our own email (exact match or bracket match)
+        true >= keep
+        addr | When(Is(my-email) {false > keep})
+        addr | When({String.Ends(With: my-email-bracket)} {false > keep})
+        // Skip if this matches the reply-to address
+        addr | When(Is(reply-to-addr) {false > keep})
+        addr | When(Is(orig-from) {false > keep})
+        keep | When(IsTrue {
+          addr >> cc-parts
+        })
+      })
+    })
+  })
+
+  // Add original Cc recipients
+  Count(orig-cc) | When(IsMore(0) {
+    orig-cc | String.Split(",") | ForEach({
+      String.Trim = addr
+      Count(addr) | When(IsMore(0) {
+        true >= keep
+        addr | When(Is(my-email) {false > keep})
+        addr | When({String.Ends(With: my-email-bracket)} {false > keep})
+        addr | When(Is(reply-to-addr) {false > keep})
+        addr | When(Is(orig-from) {false > keep})
+        keep | When(IsTrue {
+          addr >> cc-parts
+        })
+      })
+    })
+  })
 
   // Ensure subject has Re: prefix
   orig-subject | If({String.Starts(With: "Re: ")} Pass {["Re: " orig-subject] | String.Join}) = subject
@@ -56,6 +120,22 @@
   // Build RFC 2822 reply message
   "" >= message
   ["To: " to "\r\n"] | String.Join | AppendTo(message)
+
+  // Add Cc header if there are additional recipients
+  Count(cc-parts) | When(IsMore(0) {
+    // Join cc-parts with ", " separator
+    "" >= cc-header
+    0 >= cc-idx
+    cc-parts | ForEach({
+      cc-idx | When(IsMore(0) {
+        ", " | AppendTo(cc-header)
+      })
+      $0 | AppendTo(cc-header)
+      Inc(cc-idx)
+    })
+    ["Cc: " cc-header "\r\n"] | String.Join | AppendTo(message)
+  })
+
   ["Subject: " subject "\r\n"] | String.Join | AppendTo(message)
   "Content-Type: text/plain; charset=\"UTF-8\"\r\n" | AppendTo(message)
 
@@ -78,10 +158,10 @@
 
   response | Take("id") | When(IsString {
     ExpectString = sent-id
-    ["Reply sent successfully. Message ID: " sent-id] | String.Join
+    ["Reply-all sent successfully. Message ID: " sent-id] | String.Join
   })
   When(IsNone {
-    "Reply sent but no message ID returned."
+    "Reply-all sent but no message ID returned."
   })
 } Pure: true)
 
@@ -92,7 +172,7 @@
 {
   definition: {
     name: "reply_email"
-    description: "Reply to an existing email. Automatically threads the reply in the same conversation and addresses it to the original sender."
+    description: "Reply-all to an existing email. Automatically threads the reply in the same conversation, addresses it to the original sender, and CCs all other original recipients (To and Cc), excluding yourself."
     parameters: {
       type: "object"
       properties: {
@@ -106,7 +186,7 @@
         }
         to: {
           type: "string"
-          description: "Override the recipient. By default replies to the original sender. Optional."
+          description: "Override the primary recipient. By default replies to the original sender (or Reply-To address). Optional."
         }
         account-index: {
           type: "integer"
