@@ -123,16 +123,7 @@
 
   // Add Cc header if there are additional recipients
   Count(cc-parts) | When(IsMore(0) {
-    // Join cc-parts with ", " separator
-    "" >= cc-header
-    0 >= cc-idx
-    cc-parts | ForEach({
-      cc-idx | When(IsMore(0) {
-        ", " | AppendTo(cc-header)
-      })
-      $0 | AppendTo(cc-header)
-      Inc(cc-idx)
-    })
+    cc-parts | String.Join(Separator: ", ") = cc-header
     ["Cc: " cc-header "\r\n"] | String.Join | AppendTo(message)
   })
 
