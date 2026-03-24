@@ -114,8 +114,16 @@
     })
   })
 
-  // Ensure subject has Re: prefix
-  orig-subject | If({String.Starts(With: "Re: ")} Pass {["Re: " orig-subject] | String.Join}) = subject
+  // Strip all existing Re:/RE:/re: prefixes, then add a single canonical "Re: "
+  orig-subject >= clean-subject
+  Repeat({
+    clean-subject = prev-subject
+    When({clean-subject | String.Starts(With: "Re: ")} {clean-subject | Slice(From: 4) > clean-subject})
+    When({clean-subject | String.Starts(With: "RE: ")} {clean-subject | Slice(From: 4) > clean-subject})
+    When({clean-subject | String.Starts(With: "re: ")} {clean-subject | Slice(From: 4) > clean-subject})
+    clean-subject | When(Is(prev-subject) Return)
+  } Times: 10)
+  ["Re: " clean-subject] | String.Join = subject
 
   // Build RFC 2822 reply message
   "" >= message
@@ -127,7 +135,9 @@
     ["Cc: " cc-header "\r\n"] | String.Join | AppendTo(message)
   })
 
-  ["Subject: " subject "\r\n"] | String.Join | AppendTo(message)
+  // RFC 2047 encode subject to safely handle non-ASCII characters (e.g. en-dash)
+  subject | StringToBytes | ToBase64 = encoded-subject
+  ["Subject: =?UTF-8?B?" encoded-subject "?=\r\n"] | String.Join | AppendTo(message)
   "Content-Type: text/plain; charset=\"UTF-8\"\r\n" | AppendTo(message)
 
   // Threading headers

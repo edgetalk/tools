@@ -32,7 +32,9 @@
     ["Bcc: " bcc "\r\n"] | String.Join | AppendTo(message)
   })
 
-  ["Subject: " subject "\r\n"] | String.Join | AppendTo(message)
+  // RFC 2047 encode subject to safely handle non-ASCII characters (e.g. en-dash)
+  subject | StringToBytes | ToBase64 = encoded-subject
+  ["Subject: =?UTF-8?B?" encoded-subject "?=\r\n"] | String.Join | AppendTo(message)
   "Content-Type: text/plain; charset=\"UTF-8\"\r\n" | AppendTo(message)
   "\r\n" | AppendTo(message)
   body | AppendTo(message)
