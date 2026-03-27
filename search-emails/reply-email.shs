@@ -5,6 +5,14 @@
   Replace(["+"] "-") | Replace(["/"] "_") | Replace(["="] "")
 })
 
+@template(bare-email [] {
+  String.Split("<") | If({Count | IsMore(1)} {
+    RTake(0) | String.Split(">") | Take(0) | String.Trim
+  } {
+    Take(0) | String.Trim
+  })
+})
+
 @wire(reply-email-inner {
   = input
   input.message-id | ExpectString = message-id
@@ -70,26 +78,26 @@
   // Override To if explicitly provided, otherwise use reply-to address
   input.to | If(IsString ExpectString {reply-to-addr}) = to
 
-  // Build match patterns for filtering: plain email and "<email>" suffix format
-  ["<" my-email ">"] | String.Join = my-email-bracket
+  // Extract bare email addresses for robust comparison (handles "Name <email>" format)
+  reply-to-addr | @bare-email = reply-to-bare
+  orig-from | @bare-email = orig-from-bare
+  to | @bare-email = to-bare
 
   // Build Cc list from original To and Cc, filtering out our own email and the To address
   Sequence(cc-parts Type: @type([Type::String]))
 
-  // Template to check if an address matches a given email (plain or "Name <email>" format)
   // Add original To recipients (may contain multiple comma-separated addresses)
   Count(orig-to) | When(IsMore(0) {
     orig-to | String.Split(",") | ForEach({
       String.Trim = addr
       // Skip empty entries
       Count(addr) | When(IsMore(0) {
-        // Skip if this is our own email (exact match or bracket match)
+        addr | @bare-email = addr-email
         true >= keep
-        addr | When(Is(my-email) {false > keep})
-        addr | When({String.Ends(With: my-email-bracket)} {false > keep})
-        // Skip if this matches the reply-to address
-        addr | When(Is(reply-to-addr) {false > keep})
-        addr | When(Is(orig-from) {false > keep})
+        addr-email | When(Is(my-email) {false > keep})
+        addr-email | When(Is(reply-to-bare) {false > keep})
+        addr-email | When(Is(orig-from-bare) {false > keep})
+        addr-email | When(Is(to-bare) {false > keep})
         keep | When(IsTrue {
           addr >> cc-parts
         })
@@ -102,11 +110,12 @@
     orig-cc | String.Split(",") | ForEach({
       String.Trim = addr
       Count(addr) | When(IsMore(0) {
+        addr | @bare-email = addr-email
         true >= keep
-        addr | When(Is(my-email) {false > keep})
-        addr | When({String.Ends(With: my-email-bracket)} {false > keep})
-        addr | When(Is(reply-to-addr) {false > keep})
-        addr | When(Is(orig-from) {false > keep})
+        addr-email | When(Is(my-email) {false > keep})
+        addr-email | When(Is(reply-to-bare) {false > keep})
+        addr-email | When(Is(orig-from-bare) {false > keep})
+        addr-email | When(Is(to-bare) {false > keep})
         keep | When(IsTrue {
           addr >> cc-parts
         })
