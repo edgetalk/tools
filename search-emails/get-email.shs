@@ -7,54 +7,76 @@
   Replace(["-"] "+") | Replace(["_"] "/") | FromBase64 | BytesToString
 })
 
+// Extract body data from a single MIME part (template = pure macro expansion, no state)
+@template(extract-body-from-part [part] {
+  part | Take("mimeType") | When(IsString {
+    ExpectString
+    When(Is("text/plain") {
+      part | Take("body") | When(IsTable {
+        ExpectTable | Take("data") | When(IsString {
+          ExpectString | @url-safe-base64-decode > plain-body
+        })
+      })
+    })
+    When(Is("text/html") {
+      part | Take("body") | When(IsTable {
+        ExpectTable | Take("data") | When(IsString {
+          ExpectString | @url-safe-base64-decode > html-body
+        })
+      })
+    })
+  })
+})
+
 @wire(get-email-inner {
   = input
   input.message-id | ExpectString = message-id
   input.account-index | If(IsInt ExpectInt {1}) | Google.Auth = google-token
-  
+
   {
     "Authorization": (["Bearer " google-token] | String.Join)
     "Accept": "application/json"
   } = headers
-  
+
   "" >= plain-body
   "" >= html-body
-  
+
   ["https://gmail.googleapis.com/gmail/v1/users/me/messages/" message-id] | String.Join = url
   {format: "full"} | Http.Get(url Headers: headers)
   Await(FromJson) | ExpectTable = message
-  
+
   message.payload | ExpectTable = payload
-  
+
   // Simple message (no parts) - body directly on payload
   payload | Take("body") | When(IsTable {
     ExpectTable | Take("data") | When(IsString {
       ExpectString | @url-safe-base64-decode > plain-body
     })
   })
-  
-  // Multipart message - iterate through parts
-  payload.parts | When(IsSeq {
+
+  // Multipart message - iterate through parts (up to 3 levels deep)
+  // Handles: multipart/mixed > multipart/related > multipart/alternative > text/*
+  payload | Take("parts") | When(IsSeq {
     ExpectSeq | ForEach({
-      $0.mimeType
-      When(Is("text/plain") {
-        $0.body | When(IsTable {
-          ExpectTable | Take("data") | When(IsString {
-            ExpectString | @url-safe-base64-decode > plain-body
-            Return // we are good with plain just exit
-          })
-        })
-      })
-      When(Is("text/html") {
-        $0.body | When(IsTable {
-          ExpectTable | Take("data") | When(IsString {
-            ExpectString | @url-safe-base64-decode > html-body // our second choice
+      ExpectTable = l1-part
+      @extract-body-from-part(l1-part)
+      // Level 2: nested multipart (e.g. multipart/alternative inside multipart/mixed)
+      l1-part | Take("parts") | When(IsSeq {
+        ExpectSeq | ForEach({
+          ExpectTable = l2-part
+          @extract-body-from-part(l2-part)
+          // Level 3: e.g. multipart/alternative inside multipart/related inside multipart/mixed
+          l2-part | Take("parts") | When(IsSeq {
+            ExpectSeq | ForEach({
+              ExpectTable = l3-part
+              @extract-body-from-part(l3-part)
+            })
           })
         })
       })
     })
   })
-  
+
   If({Count(plain-body) | Is(0)} {html-body | Markdown.FromHTML} {plain-body})
 } Pure: true)
 
