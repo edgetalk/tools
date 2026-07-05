@@ -1,0 +1,272 @@
+// Google Flights search via the FlightsFrontendService GetShoppingResults RPC.
+// The request payload / response layout is reverse-engineered (same wire format
+// used by the fli and fast-flights projects). No API key required.
+
+// coerce a dynamic value to int, with a default when missing/null
+@template(gf-int-or [d] {
+  If(IsInt ExpectInt {d})
+})
+
+// element of a seq at index i as int, or default d when out of range / not an int
+@template(gf-at-int [i d] {
+  If({Count | IsMore(i)} {Take(i) | @gf-int-or(d)} {d})
+})
+
+// format [y m d] + [h m] arrays into "2026-08-20 07:35"
+// zero-pad trick: n+100 = "1nn", slice from 1 -> "nn"
+@template(gf-fmt-dt [date-arr time-arr] {
+  [
+    (date-arr | @gf-at-int(0 0) | ToString) "-"
+    (date-arr | @gf-at-int(1 0) | Add(100) | ToString | Slice(From: 1)) "-"
+    (date-arr | @gf-at-int(2 0) | Add(100) | ToString | Slice(From: 1)) " "
+    (time-arr | @gf-at-int(0 0) | Add(100) | ToString | Slice(From: 1)) ":"
+    (time-arr | @gf-at-int(1 0) | Add(100) | ToString | Slice(From: 1))
+  ] | String.Join
+})
+
+// minutes -> "7h05m"
+@template(gf-fmt-mins [mins] {
+  [(mins | Div(60)) "h" (mins | Math.Mod(60) | Add(100) | ToString | Slice(From: 1)) "m"] | String.Format
+})
+
+@wire(google-flights-search-inner {
+  = input
+  input.from | ExpectString | String.ToUpper = from-code
+  input.to | ExpectString | String.ToUpper = to-code
+  input.date | ExpectString = date
+  input.return-date | If(IsString ExpectString {""}) = ret-date
+  ret-date | IsNot("") = round-trip
+  round-trip | If(IsTrue {1} {2}) = trip-type
+
+  input.adults | @gf-int-or(1) = adults
+  input.currency | If(IsString ExpectString {"USD"}) | String.ToUpper = currency
+  input.seat | If(IsString ExpectString {"economy"}) | Match([
+    "economy" {1}
+    "premium-economy" {2}
+    "business" {3}
+    "first" {4}
+    none {1}
+  ] Passthrough: false) = seat
+  // user-facing max stops -> Google enum (0=any 1=nonstop 2=1 stop 3=2 stops)
+  input.max-stops | @gf-int-or(-1) | Match([
+    0 {1}
+    1 {2}
+    2 {3}
+    none {0}
+  ] Passthrough: false) = stops
+  input.sort | If(IsString ExpectString {"best"}) | Match([
+    "top" {0}
+    "best" {1}
+    "cheapest" {2}
+    "departure-time" {3}
+    "arrival-time" {4}
+    "duration" {5}
+    none {1}
+  ] Passthrough: false) = sort-mode
+
+  [[[from-code 0]]] = dep-airports
+  [[[to-code 0]]] = arr-airports
+  [dep-airports arr-airports none stops none none date none none none none none none none 3] = out-segment
+  [arr-airports dep-airports none stops none none ret-date none none none none none none none 1] = ret-segment
+  round-trip | If(IsTrue {
+    [out-segment ret-segment]
+  } {
+    [out-segment]
+  }) = segments
+
+  [
+    []
+    [none none trip-type none [] seat [adults 0 0 0] none none none none none none segments none none none 1 none none none none none none none none none none 0]
+    sort-mode 1 0 1
+  ] | Await(ToJson) = inner-json
+  [none inner-json] | Await(ToJson) | String.EncodeURI = encoded
+  ["f.req=" encoded] | String.Join = post-body
+
+  ["https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults?curr=" currency] | String.Join = url
+  post-body | Http.Post(
+    url
+    Headers: {
+      "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+    Timeout: 60
+  ) = response
+
+  // responses look like ")]}'\n\n[[\"wrb.fr\",null,\"<inner json>\"]]..."
+  "" >= chunk-line
+  response | String.Split("\n") | ForEach({
+    = line
+    line | When({String.Starts(With: "[[") | And | chunk-line | Is("")} {
+      line > chunk-line
+    })
+  })
+  chunk-line | When(Is("") {"Google Flights returned an unexpected response" | Fail})
+
+  chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) | ExpectString
+  Await(FromJson) | ExpectSeq = inner
+
+  "" >= result
+  round-trip | If(IsTrue {
+    ["Round-trip " from-code " -> " to-code " departing " date ", returning " ret-date " (prices in " currency " are round-trip totals; outbound options listed, pick the return leg on Google Flights)\n"] | String.Join
+  } {
+    ["One-way " from-code " -> " to-code " on " date " (prices in " currency ")\n"] | String.Join
+  }) | AppendTo(result)
+
+  0 >= flight-count
+
+  // best flights live at inner[2][0], the rest at inner[3][0]
+  [2 3] | ForEach({
+    = section-idx
+    inner | Take(section-idx)
+    When(IsSeq {
+      ExpectSeq | Take(0)
+      When(IsSeq {
+        ExpectSeq
+        ForEach({
+          = row
+          Maybe({
+            flight-count | When(IsLess(12) {
+              row | ExpectSeq = row-seq
+              row-seq | Take(0) | ExpectSeq = detail
+
+              // price: row[1][0] last element; sometimes absent
+              "n/a" >= price-str
+              row-seq | Take(1) | When(IsSeq {
+                ExpectSeq | Take(0) | When(IsSeq {
+                  ExpectSeq = price-head
+                  price-head | Count | When(IsMore(0) {
+                    price-head | RTake(0) = raw-price
+                    raw-price | If(IsFloat {ExpectFloat | ToInt} {@gf-int-or(0)}) | ToString > price-str
+                  })
+                })
+              })
+
+              detail | Take(9) | @gf-int-or(0) = total-mins
+              detail | Take(2) | ExpectSeq = legs
+              legs | Count = num-legs
+              num-legs | Sub(1) | Max(0) = num-stops
+
+              Inc(flight-count)
+              [
+                "\n" flight-count ". " price-str " " currency " — " (@gf-fmt-mins(total-mins)) " — "
+                (num-stops | If(Is(0) {"nonstop"} {[num-stops " stop(s)"] | String.Format}))
+                "\n"
+              ] | String.Format | AppendTo(result)
+
+              legs | ForEach({
+                = raw-leg
+                raw-leg | ExpectSeq = leg
+                leg | Take(3) | ExpectString = leg-from
+                leg | Take(6) | ExpectString = leg-to
+                leg | Take(8) | ExpectSeq = dep-time
+                leg | Take(10) | ExpectSeq = arr-time
+                leg | Take(20) | ExpectSeq = dep-date
+                leg | Take(21) | ExpectSeq = arr-date
+                leg | Take(22) | ExpectSeq = airline-info
+                airline-info | Take(0) | If(IsString ExpectString {""}) = airline-code
+                airline-info | Take(1) | If(IsString ExpectString {""}) = flight-num
+                airline-info | Take(3) | If(IsString ExpectString {""}) = airline-name
+                leg | Take(17) | If(IsString ExpectString {""}) = aircraft
+                leg | Take(11) | @gf-int-or(0) = leg-mins
+
+                [
+                  "   " airline-code " " flight-num " (" airline-name "): "
+                  leg-from " " (@gf-fmt-dt(dep-date dep-time)) " -> "
+                  leg-to " " (@gf-fmt-dt(arr-date arr-time))
+                  " [" (@gf-fmt-mins(leg-mins)) (aircraft | If(Is("") {""} {[", " aircraft] | String.Format})) "]\n"
+                ] | String.Format | AppendTo(result)
+              })
+
+              // layovers from detail[13]: [duration-mins IATA IATA null airport-name city ...]
+              detail | Take(13) | When(IsSeq {
+                ExpectSeq | ForEach({
+                  = lay-raw
+                  lay-raw | When(IsSeq {
+                    ExpectSeq = lay
+                    lay | Take(0) | @gf-int-or(0) = lay-mins
+                    lay | Take(1) | If(IsString ExpectString {""}) = lay-code
+                    lay | Take(4) | If(IsString ExpectString {""}) = lay-name
+                    [
+                      "   layover: " (@gf-fmt-mins(lay-mins)) " at " lay-code
+                      (lay-name | If(Is("") {""} {[" (" lay-name ")"] | String.Format})) "\n"
+                    ] | String.Format | AppendTo(result)
+                  })
+                })
+              })
+            })
+          } {
+            Msg("google-flights: skipped a malformed flight row")
+          })
+        })
+      })
+    })
+  })
+
+  flight-count | When(Is(0) {
+    "\nNo flights found for this route/date.\n" | AppendTo(result)
+  })
+
+  round-trip | If(IsTrue {
+    ["Flights from " from-code " to " to-code " on " date " returning " ret-date] | String.Join
+  } {
+    ["Flights from " from-code " to " to-code " on " date] | String.Join
+  }) | String.EncodeURI = link-query
+  ["\nBook / see more: https://www.google.com/travel/flights?q=" link-query "&curr=" currency "\n"] | String.Join | AppendTo(result)
+
+  result
+} Pure: true)
+
+@wire(google-flights-search {
+  Do(google-flights-search-inner)
+})
+
+{
+  definition: {
+    name: "google_flights_search"
+    description: "Search Google Flights for one-way or round-trip flights between two airports on given dates. Returns prices, airlines, flight numbers, times, durations, stops and layovers, plus a booking link."
+    parameters: {
+      type: "object"
+      properties: {
+        from: {
+          type: "string"
+          description: "Departure airport IATA code, e.g. KIX. No spaces."
+        }
+        to: {
+          type: "string"
+          description: "Arrival airport IATA code, e.g. NRT. No spaces."
+        }
+        date: {
+          type: "string"
+          description: "Departure date in YYYY-MM-DD format."
+        }
+        return-date: {
+          type: "string"
+          description: "Optional return date in YYYY-MM-DD format. When set, the search becomes a round trip: prices are round-trip totals and the listed options are the outbound legs."
+        }
+        adults: {
+          type: "integer"
+          description: "Number of adult passengers. Default 1."
+        }
+        seat: {
+          type: "string"
+          description: "Cabin class: economy, premium-economy, business or first. Default economy."
+        }
+        max-stops: {
+          type: "integer"
+          description: "Maximum number of stops: 0 = nonstop only, 1, or 2. Omit for any."
+        }
+        sort: {
+          type: "string"
+          description: "Sort order: best, top, cheapest, departure-time, arrival-time or duration. Default best."
+        }
+        currency: {
+          type: "string"
+          description: "ISO 4217 currency code for prices, e.g. USD, EUR, JPY. Default USD."
+        }
+      }
+      required: ["from" "to" "date"]
+    }
+  }
+
+  use: google-flights-search
+}

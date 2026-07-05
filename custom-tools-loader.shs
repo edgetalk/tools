@@ -24,6 +24,10 @@
 // remote SSH tools
 @read("ssh-shell-cmd/ssh-shell-cmd.shs") | Do(add-tool)
 
+// google flights tools
+@read("google-flights/search-flights.shs") | Do(add-tool)
+@read("google-flights/cheap-dates.shs") | Do(add-tool)
+
 // // Alpha Vantage financial tools
 // @read("alpha-vantage/stock-quote.shs") | Do(add-tool)
 // @read("alpha-vantage/stock-search.shs") | Do(add-tool)

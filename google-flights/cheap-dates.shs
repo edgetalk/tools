@@ -1,0 +1,184 @@
+// Google Flights price calendar via the FlightsFrontendService GetCalendarGraph RPC.
+// Finds the cheapest dates to fly over a date range. Same reverse-engineered wire
+// format as search-flights.shs. No API key required.
+
+// coerce a dynamic value to int, with a default when missing/null
+@template(gfd-int-or [d] {
+  If(IsInt ExpectInt {d})
+})
+
+@wire(google-flights-cheap-dates-inner {
+  = input
+  input.from | ExpectString | String.ToUpper = from-code
+  input.to | ExpectString | String.ToUpper = to-code
+  input.from-date | ExpectString = from-date
+  input.to-date | ExpectString = to-date
+  input.adults | @gfd-int-or(1) = adults
+  input.currency | If(IsString ExpectString {"USD"}) | String.ToUpper = currency
+  input.seat | If(IsString ExpectString {"economy"}) | Match([
+    "economy" {1}
+    "premium-economy" {2}
+    "business" {3}
+    "first" {4}
+    none {1}
+  ] Passthrough: false) = seat
+  // trip duration in days; > 0 means round trip priced for the full trip
+  input.duration | @gfd-int-or(0) = duration
+  duration | IsMore(0) = round-trip
+  round-trip | If(IsTrue {1} {2}) = trip-type
+
+  // return segment date = from-date + duration days
+  from-date | Date.Parse(Format: "%Y-%m-%d") = from-epoch
+  duration | Mul(86400) | Add(from-epoch) | Date.Format("%Y-%m-%d") = ret-date
+
+  [[[from-code 0]]] = dep-airports
+  [[[to-code 0]]] = arr-airports
+  [dep-airports arr-airports none 0 none none from-date none none none none none none none 3] = out-segment
+  [arr-airports dep-airports none 0 none none ret-date none none none none none none none 3] = ret-segment
+  round-trip | If(IsTrue {
+    [out-segment ret-segment]
+  } {
+    [out-segment]
+  }) = segments
+
+  [none none trip-type none [] seat [adults 0 0 0] none none none none none none segments none none none 1] = main-filters
+  round-trip | If(IsTrue {
+    [none main-filters [from-date to-date] none [duration duration]] | Await(ToJson)
+  } {
+    [none main-filters [from-date to-date]] | Await(ToJson)
+  }) = inner-json
+  [none inner-json] | Await(ToJson) | String.EncodeURI = encoded
+  ["f.req=" encoded] | String.Join = post-body
+
+  ["https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGraph?curr=" currency] | String.Join = url
+  post-body | Http.Post(
+    url
+    Headers: {
+      "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+    Timeout: 60
+  ) = response
+
+  // responses look like ")]}'\n\n[[\"wrb.fr\",null,\"<inner json>\"]]..."
+  "" >= chunk-line
+  response | String.Split("\n") | ForEach({
+    = line
+    line | When({String.Starts(With: "[[") | And | chunk-line | Is("")} {
+      line > chunk-line
+    })
+  })
+  chunk-line | When(Is("") {"Google Flights returned an unexpected response" | Fail})
+
+  chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) | ExpectString
+  Await(FromJson) | ExpectSeq = inner
+
+  "" >= result
+  round-trip | If(IsTrue {
+    [from-code " -> " to-code " round-trip prices (" duration "-day trip, totals in " currency ") by departure date:\n"] | String.Format
+  } {
+    [from-code " -> " to-code " one-way prices (in " currency ") by date:\n"] | String.Format
+  }) | AppendTo(result)
+
+  0 >= date-count
+  999999999 >= best-price
+  "" >= best-date
+
+  // date/price entries live in the last element of the payload:
+  // [date, return-date?, [[null price], currency-token]]
+  inner | RTake(0) | When(IsSeq {
+    ExpectSeq
+    ForEach({
+      = item
+      Maybe({
+        item | ExpectSeq = item-seq
+        item-seq | Take(0) | ExpectString = out-date
+        item-seq | Take(1) | If(IsString ExpectString {""}) = item-ret-date
+        0 >= price
+        item-seq | Take(2) | When(IsSeq {
+          ExpectSeq | Take(0) | When(IsSeq {
+            ExpectSeq = price-head
+            price-head | Count | When(IsMore(0) {
+              price-head | RTake(0) = raw-price
+              raw-price | If(IsFloat {ExpectFloat | ToInt} {@gfd-int-or(0)}) > price
+            })
+          })
+        })
+
+        price | When(IsMore(0) {
+          Inc(date-count)
+          [
+            out-date
+            (item-ret-date | If(Is("") {""} {[" ~ " item-ret-date] | String.Format}))
+            ": " price "\n"
+          ] | String.Format | AppendTo(result)
+          price | When(IsLess(best-price) {
+            price > best-price
+            out-date > best-date
+          })
+        })
+      } {
+        Msg("google-flights: skipped a malformed calendar entry")
+      })
+    })
+  })
+
+  date-count | If(Is(0) {
+    "No prices found for this route/date range (note: ranges longer than 61 days are not supported in a single call).\n"
+  } {
+    ["\nCheapest: " best-date " at " best-price " " currency "\n"] | String.Format
+  }) | AppendTo(result)
+
+  result
+} Pure: true)
+
+@wire(google-flights-cheap-dates {
+  Do(google-flights-cheap-dates-inner)
+})
+
+{
+  definition: {
+    name: "google_flights_cheap_dates"
+    description: "Scan a date range on Google Flights and return the price for each departure date, to find the cheapest dates to fly. Supports one-way or fixed-duration round trips. Max 61 days per call."
+    parameters: {
+      type: "object"
+      properties: {
+        from: {
+          type: "string"
+          description: "Departure airport IATA code, e.g. KIX. No spaces."
+        }
+        to: {
+          type: "string"
+          description: "Arrival airport IATA code, e.g. NRT. No spaces."
+        }
+        from-date: {
+          type: "string"
+          description: "Start of the date range to scan, YYYY-MM-DD."
+        }
+        to-date: {
+          type: "string"
+          description: "End of the date range to scan, YYYY-MM-DD. At most 61 days after from-date."
+        }
+        duration: {
+          type: "integer"
+          description: "Optional trip length in days. When set, prices are round-trip totals for a trip of exactly this many days; when omitted, prices are one-way."
+        }
+        adults: {
+          type: "integer"
+          description: "Number of adult passengers. Default 1."
+        }
+        seat: {
+          type: "string"
+          description: "Cabin class: economy, premium-economy, business or first. Default economy."
+        }
+        currency: {
+          type: "string"
+          description: "ISO 4217 currency code for prices, e.g. USD, EUR, JPY. Default USD."
+        }
+      }
+      required: ["from" "to" "from-date" "to-date"]
+    }
+  }
+
+  use: google-flights-cheap-dates
+}
