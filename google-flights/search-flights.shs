@@ -102,7 +102,13 @@
   })
   chunk-line | When(Is("") {"Google Flights returned an unexpected response" | Fail})
 
-  chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) | ExpectString
+  chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) = payload-raw
+  // when Google rate-limits / bot-blocks the caller it returns a wrb.fr row
+  // with a null payload (and an error marker like [13]) instead of results
+  payload-raw | When(IsNone {
+    "Google Flights temporarily refused this request (rate-limit / bot detection). This usually clears on its own - retry in a few minutes." | Fail
+  })
+  payload-raw | ExpectString
   Await(FromJson) | ExpectSeq = inner
 
   "" >= result
