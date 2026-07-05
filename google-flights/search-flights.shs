@@ -103,12 +103,45 @@
   chunk-line | When(Is("") {"Google Flights returned an unexpected response" | Fail})
 
   chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) = payload-raw
-  // when Google rate-limits / bot-blocks the caller it returns a wrb.fr row
-  // with a null payload (and an error marker like [13]) instead of results
-  payload-raw | When(IsNone {
-    "Google Flights temporarily refused this request (rate-limit / bot detection). This usually clears on its own - retry in a few minutes." | Fail
+  // when Google rate-limits / bot-blocks the caller it returns a wrb.fr row with a
+  // null payload (and an error marker like [13]) instead of results. The website
+  // HTML route is scored separately and embeds the exact same payload structure in
+  // an AF_initDataCallback ds:1 script block, so fall back to that.
+  false >= used-fallback
+  payload-raw | If(IsString {
+    ExpectString
+  } {
+    true > used-fallback
+
+    input.seat | If(IsString ExpectString {"economy"}) | Match([
+      "premium-economy" {"premium economy "}
+      "business" {"business class "}
+      "first" {"first class "}
+      none {""}
+    ] Passthrough: false) = q-seat
+    input.max-stops | @gf-int-or(-1) | If(Is(0) {"nonstop "} {""}) = q-nonstop
+    round-trip | If(IsTrue {
+      [q-seat q-nonstop "flights from " from-code " to " to-code " on " date " returning " ret-date] | String.Join
+    } {
+      [q-seat q-nonstop "flights from " from-code " to " to-code " on " date] | String.Join
+    }) | String.EncodeURI = fallback-q
+    ["https://www.google.com/travel/flights?q=" fallback-q "&curr=" currency "&hl=en"] | String.Join = fallback-url
+
+    none | Http.Get(
+      fallback-url
+      Headers: {
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "accept-language": "en-US,en;q=0.9"
+      }
+      Timeout: 60
+    ) = fallback-html
+    fallback-html | String.Split("AF_initDataCallback({key: 'ds:1'") = fallback-parts
+    fallback-parts | Count | When(IsLess(2) {
+      "Google Flights temporarily refused this request on both the API and HTML routes (rate-limit / bot detection). This usually clears on its own - retry later." | Fail
+    })
+    fallback-parts | Take(1) | String.Split("', data:") | Take(1) | String.Split(", sideChannel") | Take(0)
   })
-  payload-raw | ExpectString
   Await(FromJson) | ExpectSeq = inner
 
   "" >= result
@@ -117,6 +150,9 @@
   } {
     ["One-way " from-code " -> " to-code " on " date " (prices in " currency ")\n"] | String.Join
   }) | AppendTo(result)
+  used-fallback | When(IsTrue {
+    "[via HTML fallback - the fast API is rate-limited right now; passenger count and sort order may be ignored]\n" | AppendTo(result)
+  })
 
   0 >= flight-count
 

@@ -22,6 +22,14 @@ the `GetShoppingResults` endpoint.
   a Google Flights link for booking.
 - Round trips are priced as full-trip totals; the listed options are the
   outbound legs (the return leg is picked on Google Flights when booking).
+- If Google rate-limits the RPC endpoint (it returns a null `wrb.fr` payload
+  with a `[13]` marker after sustained cookieless traffic), the tool
+  automatically falls back to fetching the website's HTML search page
+  (`/travel/flights?q=...`) and extracting the identical payload from its
+  `AF_initDataCallback` `ds:1` script block. The fallback carries route,
+  dates, cabin and nonstop preferences in the natural-language query, but
+  passenger count and sort order may be ignored; output is tagged when the
+  fallback was used.
 
 ### `google_flights_cheap_dates` (cheap-dates.shs)
 
@@ -34,6 +42,8 @@ Scan a date range and return the lowest fare for each departure date via the
   `currency`.
 - Output: one price per date (departure ~ return pairs for round trips) plus
   the cheapest date found.
+- No HTML fallback exists for the calendar endpoint; while rate-limited it
+  fails with a clear "retry later" message.
 
 ## How It Works
 
