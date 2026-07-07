@@ -1,19 +1,38 @@
-// Google Flights search via the FlightsFrontendService GetShoppingResults RPC.
-// The request payload / response layout is reverse-engineered (same wire format
-// used by the fli and fast-flights projects). No API key required.
+// Google Flights search via the public website's HTML search page.
+//
+// Google's fast JSON RPC (batchexecute / FlightsFrontendService) is blocked for
+// cookieless callers from most IPs, so this tool drives the same route a browser
+// navigates to: it builds the deterministic `tfs` protobuf itinerary token (exactly
+// like the fast-flights project), GETs /travel/flights/search?tfs=..., and reads the
+// flight data Google embeds server-side in the page's `ds:1` script block. No API key.
 
-// coerce a dynamic value to int, with a default when missing/null
+@define(gf-ua "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+// --- minimal protobuf encoder (varint / string / embedded-message fields) ---
+// tag = (field << 3) | wiretype ; ToLEB128 gives the protobuf varint encoding.
+@template(gf-pb-varint [field val] {
+  [(field | Mul(8) | ToLEB128) (val | ToLEB128)] | Bytes.Join
+})
+@template(gf-pb-str [field s] {
+  s | StringToBytes = _sb
+  [(field | Mul(8) | Add(2) | ToLEB128) (_sb | Count | ToLEB128) _sb] | Bytes.Join
+})
+@template(gf-pb-msg [field mb] {
+  [(field | Mul(8) | Add(2) | ToLEB128) (mb | Count | ToLEB128) mb] | Bytes.Join
+})
+// one FlightData leg: date@2, from_airport@13{airport@2}, to_airport@14{airport@2}
+@template(gf-leg [date from to] {
+  [(@gf-pb-str(2 date)) (@gf-pb-msg(13 (@gf-pb-str(2 from)))) (@gf-pb-msg(14 (@gf-pb-str(2 to))))] | Bytes.Join
+})
+
+// --- small helpers ---
 @template(gf-int-or [d] {
   If(IsInt ExpectInt {d})
 })
-
-// element of a seq at index i as int, or default d when out of range / not an int
 @template(gf-at-int [i d] {
   If({Count | IsMore(i)} {Take(i) | @gf-int-or(d)} {d})
 })
-
-// format [y m d] + [h m] arrays into "2026-08-20 07:35"
-// zero-pad trick: n+100 = "1nn", slice from 1 -> "nn"
+// [y m d] + [h m] -> "2026-08-20 07:35" (zero-pad via n+100 then drop leading '1')
 @template(gf-fmt-dt [date-arr time-arr] {
   [
     (date-arr | @gf-at-int(0 0) | ToString) "-"
@@ -23,8 +42,6 @@
     (time-arr | @gf-at-int(1 0) | Add(100) | ToString | Slice(From: 1))
   ] | String.Join
 })
-
-// minutes -> "7h05m"
 @template(gf-fmt-mins [mins] {
   [(mins | Div(60)) "h" (mins | Math.Mod(60) | Add(100) | ToString | Slice(From: 1)) "m"] | String.Format
 })
@@ -38,7 +55,8 @@
   ret-date | IsNot("") = round-trip
   round-trip | If(IsTrue {1} {2}) = trip-type
 
-  input.adults | @gf-int-or(1) = adults
+  input.adults | @gf-int-or(1) | Max(1) = adults
+  input.children | @gf-int-or(0) | Max(0) = children
   input.currency | If(IsString ExpectString {"USD"}) | String.ToUpper = currency
   input.seat | If(IsString ExpectString {"economy"}) | Match([
     "economy" {1}
@@ -47,131 +65,97 @@
     "first" {4}
     none {1}
   ] Passthrough: false) = seat
-  // user-facing max stops -> Google enum (0=any 1=nonstop 2=1 stop 3=2 stops)
-  input.max-stops | @gf-int-or(-1) | Match([
-    0 {1}
-    1 {2}
-    2 {3}
-    none {0}
-  ] Passthrough: false) = stops
-  input.sort | If(IsString ExpectString {"best"}) | Match([
-    "top" {0}
-    "best" {1}
-    "cheapest" {2}
-    "departure-time" {3}
-    "arrival-time" {4}
-    "duration" {5}
-    none {1}
-  ] Passthrough: false) = sort-mode
+  // -1 means "any stops"; otherwise 0=nonstop, 1=<=1 stop, 2=<=2 stops (filtered client-side)
+  input.max-stops | @gf-int-or(-1) = max-stops
+  input.sort | If(IsString ExpectString {"best"}) = sort-mode
 
-  [[[from-code 0]]] = dep-airports
-  [[[to-code 0]]] = arr-airports
-  [dep-airports arr-airports none stops none none date none none none none none none none 3] = out-segment
-  [arr-airports dep-airports none stops none none ret-date none none none none none none none 1] = ret-segment
-  round-trip | If(IsTrue {
-    [out-segment ret-segment]
-  } {
-    [out-segment]
-  }) = segments
-
-  [
-    []
-    [none none trip-type none [] seat [adults 0 0 0] none none none none none none segments none none none 1 none none none none none none none none none none 0]
-    sort-mode 1 0 1
-  ] | Await(ToJson) = inner-json
-  [none inner-json] | Await(ToJson) | String.EncodeURI = encoded
-  ["f.req=" encoded] | String.Join = post-body
-
-  ["https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults?curr=" currency] | String.Join = url
-  post-body | Http.Post(
-    url
-    Headers: {
-      "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
-      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    }
-    Timeout: 60
-  ) = response
-
-  // responses look like ")]}'\n\n[[\"wrb.fr\",null,\"<inner json>\"]]..."
-  "" >= chunk-line
-  response | String.Split("\n") | ForEach({
-    = line
-    line | When({String.Starts(With: "[[") | And | chunk-line | Is("")} {
-      line > chunk-line
-    })
+  // --- build the tfs itinerary token ---
+  [] >= info-parts
+  (@gf-pb-msg(3 (@gf-leg(date from-code to-code)))) >> info-parts
+  round-trip | When(IsTrue {
+    (@gf-pb-msg(3 (@gf-leg(ret-date to-code from-code)))) >> info-parts
   })
-  chunk-line | When(Is("") {"Google Flights returned an unexpected response" | Fail})
+  [] >= pax-parts
+  Repeat({(1 | ToLEB128) >> pax-parts} Times: adults)
+  Repeat({(2 | ToLEB128) >> pax-parts} Times: children)
+  (@gf-pb-msg(8 (pax-parts | Bytes.Join))) >> info-parts
+  (@gf-pb-varint(9 seat)) >> info-parts
+  (@gf-pb-varint(19 trip-type)) >> info-parts
+  info-parts | Bytes.Join | ToBase64 = tfs
 
-  chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) = payload-raw
-  // when Google rate-limits / bot-blocks the caller it returns a wrb.fr row with a
-  // null payload (and an error marker like [13]) instead of results. The website
-  // HTML route is scored separately and embeds the exact same payload structure in
-  // an AF_initDataCallback ds:1 script block, so fall back to that.
-  false >= used-fallback
-  payload-raw | If(IsString {
-    ExpectString
-  } {
-    true > used-fallback
+  tfs | String.EncodeURI = tfs-enc
+  ["https://www.google.com/travel/flights/search?tfs=" tfs-enc "&curr=" currency "&hl=en"] | String.Join = url
 
-    input.seat | If(IsString ExpectString {"economy"}) | Match([
-      "premium-economy" {"premium economy "}
-      "business" {"business class "}
-      "first" {"first class "}
-      none {""}
-    ] Passthrough: false) = q-seat
-    input.max-stops | @gf-int-or(-1) | If(Is(0) {"nonstop "} {""}) = q-nonstop
-    round-trip | If(IsTrue {
-      [q-seat q-nonstop "flights from " from-code " to " to-code " on " date " returning " ret-date] | String.Join
-    } {
-      [q-seat q-nonstop "flights from " from-code " to " to-code " on " date] | String.Join
-    }) | String.EncodeURI = fallback-q
-    ["https://www.google.com/travel/flights?q=" fallback-q "&curr=" currency "&hl=en"] | String.Join = fallback-url
-
-    none | Http.Get(
-      fallback-url
-      Headers: {
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  // Fetch the page and extract the ds:1 flight-data array. Google sometimes serves a
+  // degraded page (ds:1 present but with no flight rows -> a short array) when it is
+  // rate-limiting; retry a couple of times, then fail with a clear message rather than
+  // crashing on a missing index downstream.
+  "" >= inner-json
+  0 >= tries
+  Repeat({
+    Inc(tries)
+    tries | When(IsMore(1) {Pause(0.8)})
+    Maybe({
+      none | Http.Get(url Headers: {
+        "user-agent": @gf-ua
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         "accept-language": "en-US,en;q=0.9"
-      }
-      Timeout: 60
-    ) = fallback-html
-    fallback-html | String.Split("AF_initDataCallback({key: 'ds:1'") = fallback-parts
-    fallback-parts | Count | When(IsLess(2) {
-      "Google Flights temporarily refused this request on both the API and HTML routes (rate-limit / bot detection). This usually clears on its own - retry later." | Fail
-    })
-    fallback-parts | Take(1) | String.Split("', data:") | Take(1) | String.Split(", sideChannel") | Take(0)
+      } Timeout: 60) = html
+      html | String.Split("AF_initDataCallback({key: 'ds:1'") = parts
+      parts | Count | When(IsMoreEqual(2) {
+        parts | Take(1) | String.Split("', data:") | Take(1) | String.Split(", sideChannel") | Take(0) = cj
+        cj | Await(FromJson) | ExpectSeq | Count | When(IsMore(3) {cj > inner-json})
+      })
+    } {Pass})
+  } Until: {
+    false >= done
+    inner-json | When(IsNot("") {true > done})
+    tries | When(IsMoreEqual(3) {true > done})
+    done
   })
-  Await(FromJson) | ExpectSeq = inner
+  inner-json | When(Is("") {
+    "Google Flights returned no usable data - it is most likely rate-limiting these requests right now. Try again in a minute or two." | Fail
+  })
+  inner-json | Await(FromJson) | ExpectSeq = inner
 
   "" >= result
   round-trip | If(IsTrue {
-    ["Round-trip " from-code " -> " to-code " departing " date ", returning " ret-date " (prices in " currency " are round-trip totals; outbound options listed, pick the return leg on Google Flights)\n"] | String.Join
+    ["Round-trip " from-code " -> " to-code " departing " date ", returning " ret-date " (prices in " currency " are round-trip totals; the outbound options are listed - pick the return leg via the link)\n"] | String.Join
   } {
     ["One-way " from-code " -> " to-code " on " date " (prices in " currency ")\n"] | String.Join
   }) | AppendTo(result)
-  used-fallback | When(IsTrue {
-    "[via HTML fallback - the fast API is rate-limited right now; passenger count and sort order may be ignored]\n" | AppendTo(result)
+  adults | Add(children) | When(IsMore(1) {
+    [adults " adult(s)" (children | If(IsMore(0) {[", " children " child(ren)"] | String.Format} {""})) "\n"] | String.Format | AppendTo(result)
   })
 
   0 >= flight-count
 
-  // best flights live at inner[2][0], the rest at inner[3][0]
-  [2 3] | ForEach({
-    = section-idx
-    inner | Take(section-idx)
-    When(IsSeq {
-      ExpectSeq | Take(0)
-      When(IsSeq {
-        ExpectSeq
-        ForEach({
-          = row
-          Maybe({
-            flight-count | When(IsLess(12) {
-              row | ExpectSeq = row-seq
-              row-seq | Take(0) | ExpectSeq = detail
+  // flight rows are at inner[3][0] (fast_flights). Optionally reorder client-side.
+  inner | Take(3) | When(IsSeq {
+    ExpectSeq | Take(0) | When(IsSeq {
+      ExpectSeq >= rows
 
-              // price: row[1][0] last element; sometimes absent
+      sort-mode | Match([
+        "cheapest" {
+          Maybe({Sort(From: rows Key: {ExpectSeq | Take(1) | ExpectSeq | Take(0) | ExpectSeq | RTake(0) | If(IsFloat {ExpectFloat | ToInt} {@gf-int-or(2147483647)})})} {Pass})
+        }
+        "duration" {
+          Maybe({Sort(From: rows Key: {ExpectSeq | Take(0) | ExpectSeq | @gf-at-int(9 2147483647)})} {Pass})
+        }
+        none {Pass}
+      ] Passthrough: false)
+
+      rows | ForEach({
+        = row
+        Maybe({
+          flight-count | When(IsLess(12) {
+            row | ExpectSeq = row-seq
+            row-seq | Take(0) | ExpectSeq = detail
+            detail | Take(2) | ExpectSeq = legs
+            legs | Count | Sub(1) | Max(0) = num-stops
+
+            // client-side stop filter
+            max-stops | When({Is(-1) | Or | num-stops | IsLessEqual(max-stops)} {
               "n/a" >= price-str
               row-seq | Take(1) | When(IsSeq {
                 ExpectSeq | Take(0) | When(IsSeq {
@@ -184,13 +168,9 @@
               })
 
               detail | Take(9) | @gf-int-or(0) = total-mins
-              detail | Take(2) | ExpectSeq = legs
-              legs | Count = num-legs
-              num-legs | Sub(1) | Max(0) = num-stops
-
               Inc(flight-count)
               [
-                "\n" flight-count ". " price-str " " currency " — " (@gf-fmt-mins(total-mins)) " — "
+                "\n" flight-count ". " price-str " " currency " - " (@gf-fmt-mins(total-mins)) " - "
                 (num-stops | If(Is(0) {"nonstop"} {[num-stops " stop(s)"] | String.Format}))
                 "\n"
               ] | String.Format | AppendTo(result)
@@ -210,7 +190,6 @@
                 airline-info | Take(3) | If(IsString ExpectString {""}) = airline-name
                 leg | Take(17) | If(IsString ExpectString {""}) = aircraft
                 leg | Take(11) | @gf-int-or(0) = leg-mins
-
                 [
                   "   " airline-code " " flight-num " (" airline-name "): "
                   leg-from " " (@gf-fmt-dt(dep-date dep-time)) " -> "
@@ -236,24 +215,18 @@
                 })
               })
             })
-          } {
-            Msg("google-flights: skipped a malformed flight row")
           })
+        } {
+          Msg("google-flights: skipped a malformed flight row")
         })
       })
     })
   })
 
   flight-count | When(Is(0) {
-    "\nNo flights found for this route/date.\n" | AppendTo(result)
+    "\nNo matching flights found for this route/date.\n" | AppendTo(result)
   })
-
-  round-trip | If(IsTrue {
-    ["Flights from " from-code " to " to-code " on " date " returning " ret-date] | String.Join
-  } {
-    ["Flights from " from-code " to " to-code " on " date] | String.Join
-  }) | String.EncodeURI = link-query
-  ["\nBook / see more: https://www.google.com/travel/flights?q=" link-query "&curr=" currency "\n"] | String.Join | AppendTo(result)
+  ["\nBook / see more: " url "\n"] | String.Join | AppendTo(result)
 
   result
 } Pure: true)
@@ -265,7 +238,7 @@
 {
   definition: {
     name: "google_flights_search"
-    description: "Search Google Flights for one-way or round-trip flights between two airports on given dates. Returns prices, airlines, flight numbers, times, durations, stops and layovers, plus a booking link."
+    description: "Search Google Flights for one-way or round-trip flights between two airports on given dates. Returns prices, airlines, flight numbers, times, durations, stops and layovers, plus a booking link. Uses the public Google Flights website (no API key)."
     parameters: {
       type: "object"
       properties: {
@@ -289,6 +262,10 @@
           type: "integer"
           description: "Number of adult passengers. Default 1."
         }
+        children: {
+          type: "integer"
+          description: "Number of child passengers. Default 0."
+        }
         seat: {
           type: "string"
           description: "Cabin class: economy, premium-economy, business or first. Default economy."
@@ -299,7 +276,7 @@
         }
         sort: {
           type: "string"
-          description: "Sort order: best, top, cheapest, departure-time, arrival-time or duration. Default best."
+          description: "Result ordering: best (default, Google's ranking), cheapest, or duration."
         }
         currency: {
           type: "string"

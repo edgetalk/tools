@@ -1,9 +1,35 @@
-// Google Flights price calendar via the FlightsFrontendService GetCalendarGraph RPC.
-// Finds the cheapest dates to fly over a date range. Same reverse-engineered wire
-// format as search-flights.shs. No API key required.
+// Google Flights "cheapest dates to fly" via the public website's HTML search page.
+//
+// Google's fast JSON RPC calendar (GetCalendarGraph) is blocked for cookieless callers,
+// and no single HTML page embeds the whole price calendar. So this tool reconstructs it
+// the way the fast-flights project searches: it runs one real flight search per date
+// (deterministic `tfs` protobuf token -> /travel/flights/search -> the `ds:1` block) and
+// takes each date's cheapest bookable fare.
+//
+// IMPORTANT: the requests are issued SEQUENTIALLY, one date at a time. Firing them
+// concurrently (e.g. via TryMany) makes Shards' HTTP client multiplex them over a single
+// HTTP/2 connection, which Google serves back as degraded pages with no flight rows.
+// Plain sequential requests are not throttled (verified: 8/8 dates in ~4s, matching what
+// curl and fast-flights get looping sequentially). No API key.
 
-// coerce a dynamic value to int, with a default when missing/null
-@template(gfd-int-or [d] {
+@define(gf-ua "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+@define(gf-max-days 45) // hard cap on how many dates one call will scan
+
+// --- minimal protobuf encoder (varint / string / embedded-message fields) ---
+@template(gf-pb-varint [field val] {
+  [(field | Mul(8) | ToLEB128) (val | ToLEB128)] | Bytes.Join
+})
+@template(gf-pb-str [field s] {
+  s | StringToBytes = _sb
+  [(field | Mul(8) | Add(2) | ToLEB128) (_sb | Count | ToLEB128) _sb] | Bytes.Join
+})
+@template(gf-pb-msg [field mb] {
+  [(field | Mul(8) | Add(2) | ToLEB128) (mb | Count | ToLEB128) mb] | Bytes.Join
+})
+@template(gf-leg [date from to] {
+  [(@gf-pb-str(2 date)) (@gf-pb-msg(13 (@gf-pb-str(2 from)))) (@gf-pb-msg(14 (@gf-pb-str(2 to))))] | Bytes.Join
+})
+@template(gf-int-or [d] {
   If(IsInt ExpectInt {d})
 })
 
@@ -13,7 +39,7 @@
   input.to | ExpectString | String.ToUpper = to-code
   input.from-date | ExpectString = from-date
   input.to-date | ExpectString = to-date
-  input.adults | @gfd-int-or(1) = adults
+  input.adults | @gf-int-or(1) | Max(1) = adults
   input.currency | If(IsString ExpectString {"USD"}) | String.ToUpper = currency
   input.seat | If(IsString ExpectString {"economy"}) | Match([
     "economy" {1}
@@ -22,62 +48,19 @@
     "first" {4}
     none {1}
   ] Passthrough: false) = seat
-  // trip duration in days; > 0 means round trip priced for the full trip
-  input.duration | @gfd-int-or(0) = duration
+  input.duration | @gf-int-or(0) | Max(0) = duration
   duration | IsMore(0) = round-trip
   round-trip | If(IsTrue {1} {2}) = trip-type
 
-  // return segment date = from-date + duration days
   from-date | Date.Parse(Format: "%Y-%m-%d") = from-epoch
-  duration | Mul(86400) | Add(from-epoch) | Date.Format("%Y-%m-%d") = ret-date
+  to-date | Date.Parse(Format: "%Y-%m-%d") = to-epoch
+  to-epoch | Sub(from-epoch) | Div(86400) | Add(1) = raw-days
+  raw-days | Max(1) | Min(@gf-max-days) = ndays
 
-  [[[from-code 0]]] = dep-airports
-  [[[to-code 0]]] = arr-airports
-  [dep-airports arr-airports none 0 none none from-date none none none none none none none 3] = out-segment
-  [arr-airports dep-airports none 0 none none ret-date none none none none none none none 3] = ret-segment
-  round-trip | If(IsTrue {
-    [out-segment ret-segment]
-  } {
-    [out-segment]
-  }) = segments
-
-  [none none trip-type none [] seat [adults 0 0 0] none none none none none none segments none none none 1] = main-filters
-  round-trip | If(IsTrue {
-    [none main-filters [from-date to-date] none [duration duration]] | Await(ToJson)
-  } {
-    [none main-filters [from-date to-date]] | Await(ToJson)
-  }) = inner-json
-  [none inner-json] | Await(ToJson) | String.EncodeURI = encoded
-  ["f.req=" encoded] | String.Join = post-body
-
-  ["https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGraph?curr=" currency] | String.Join = url
-  post-body | Http.Post(
-    url
-    Headers: {
-      "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
-      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    }
-    Timeout: 60
-  ) = response
-
-  // responses look like ")]}'\n\n[[\"wrb.fr\",null,\"<inner json>\"]]..."
-  "" >= chunk-line
-  response | String.Split("\n") | ForEach({
-    = line
-    line | When({String.Starts(With: "[[") | And | chunk-line | Is("")} {
-      line > chunk-line
-    })
-  })
-  chunk-line | When(Is("") {"Google Flights returned an unexpected response" | Fail})
-
-  chunk-line | Await(FromJson) | ExpectSeq | Take(0) | ExpectSeq | Take(2) = payload-raw
-  // when Google rate-limits / bot-blocks the caller it returns a wrb.fr row
-  // with a null payload (and an error marker like [13]) instead of results
-  payload-raw | When(IsNone {
-    "Google Flights temporarily refused this request (rate-limit / bot detection). This usually clears on its own - retry in a few minutes." | Fail
-  })
-  payload-raw | ExpectString
-  Await(FromJson) | ExpectSeq = inner
+  // passenger block is constant across dates: packed repeated enum, adult=1
+  [] >= pax-parts
+  Repeat({(1 | ToLEB128) >> pax-parts} Times: adults)
+  pax-parts | Bytes.Join = pax-packed
 
   "" >= result
   round-trip | If(IsTrue {
@@ -86,54 +69,92 @@
     [from-code " -> " to-code " one-way prices (in " currency ") by date:\n"] | String.Format
   }) | AppendTo(result)
 
-  0 >= date-count
-  999999999 >= best-price
+  2147483647 >= best-price
   "" >= best-date
+  0 >= got
+  0 >= i
+  Repeat({
+    from-epoch | Add(i | Mul(86400)) = dep-epoch
+    dep-epoch | Date.Format("%Y-%m-%d") = dep-date
+    round-trip | If(IsTrue {
+      dep-epoch | Add(duration | Mul(86400)) | Date.Format("%Y-%m-%d")
+    } {""}) = ret-date
 
-  // date/price entries live in the last element of the payload:
-  // [date, return-date?, [[null price], currency-token]]
-  inner | RTake(0) | When(IsSeq {
-    ExpectSeq
-    ForEach({
-      = item
-      Maybe({
-        item | ExpectSeq = item-seq
-        item-seq | Take(0) | ExpectString = out-date
-        item-seq | Take(1) | If(IsString ExpectString {""}) = item-ret-date
-        0 >= price
-        item-seq | Take(2) | When(IsSeq {
-          ExpectSeq | Take(0) | When(IsSeq {
-            ExpectSeq = price-head
-            price-head | Count | When(IsMore(0) {
-              price-head | RTake(0) = raw-price
-              raw-price | If(IsFloat {ExpectFloat | ToInt} {@gfd-int-or(0)}) > price
-            })
-          })
-        })
-
-        price | When(IsMore(0) {
-          Inc(date-count)
-          [
-            out-date
-            (item-ret-date | If(Is("") {""} {[" ~ " item-ret-date] | String.Format}))
-            ": " price "\n"
-          ] | String.Format | AppendTo(result)
-          price | When(IsLess(best-price) {
-            price > best-price
-            out-date > best-date
-          })
-        })
-      } {
-        Msg("google-flights: skipped a malformed calendar entry")
-      })
+    // build the tfs itinerary token for this date
+    [] >= info-parts
+    (@gf-pb-msg(3 (@gf-leg(dep-date from-code to-code)))) >> info-parts
+    round-trip | When(IsTrue {
+      (@gf-pb-msg(3 (@gf-leg(ret-date to-code from-code)))) >> info-parts
     })
-  })
+    (@gf-pb-msg(8 pax-packed)) >> info-parts
+    (@gf-pb-varint(9 seat)) >> info-parts
+    (@gf-pb-varint(19 trip-type)) >> info-parts
+    info-parts | Bytes.Join | ToBase64 | String.EncodeURI = tfs-enc
+    ["https://www.google.com/travel/flights/search?tfs=" tfs-enc "&curr=" currency "&hl=en"] | String.Join = url
 
-  date-count | If(Is(0) {
-    "No prices found for this route/date range (note: ranges longer than 61 days are not supported in a single call).\n"
+    // fetch this date's cheapest fare; retry once on a degraded page, then skip the date
+    -1 >= price
+    0 >= tries
+    Repeat({
+      Inc(tries)
+      tries | When(IsMore(1) {Pause(0.5)})
+      Maybe({
+        none | Http.Get(url Headers: {
+          "user-agent": @gf-ua
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          "accept-language": "en-US,en;q=0.9"
+        } Timeout: 60) = html
+        html | String.Split("AF_initDataCallback({key: 'ds:1'") = parts
+        parts | Count | When(IsMoreEqual(2) {
+          parts | Take(1) | String.Split("', data:") | Take(1) | String.Split(", sideChannel") | Take(0)
+          Await(FromJson) | ExpectSeq = inner
+          inner | Count | When(IsMore(3) {
+            2147483647 >= mn
+            inner | Take(3) | When(IsSeq {
+              ExpectSeq | Take(0) | When(IsSeq {
+                ExpectSeq | ForEach({
+                  Maybe({
+                    ExpectSeq | Take(1) | ExpectSeq | Take(0) | ExpectSeq = ph
+                    ph | When({Count | IsMore(0)} {
+                      ph | RTake(0) = rp
+                      rp | If(IsFloat {ExpectFloat | ToInt} {If(IsInt ExpectInt {2147483647})}) = p
+                      p | When({IsLess(mn)} {p > mn})
+                    })
+                  } {Pass})
+                })
+              })
+            })
+            mn | When(IsLess(2147483647) {mn > price})
+          })
+        })
+      } {Pass})
+    } Until: {
+      false >= done
+      price | When(IsMoreEqual(0) {true > done})
+      tries | When(IsMoreEqual(2) {true > done})
+      done
+    })
+
+    price | When(IsMoreEqual(0) {
+      Inc(got)
+      [
+        dep-date (ret-date | If(Is("") {""} {[" ~ " ret-date] | String.Format})) ": " price " " currency "\n"
+      ] | String.Format | AppendTo(result)
+      price | When({IsLess(best-price)} {price > best-price  dep-date > best-date})
+    })
+    Inc(i)
+  } Times: ndays)
+
+  got | If(Is(0) {
+    "\nNo prices found for this route/date range (Google may be blocking the requests - try again shortly).\n"
   } {
-    ["\nCheapest: " best-date " at " best-price " " currency "\n"] | String.Format
+    ["\nCheapest: " best-date " at " best-price " " currency
+     (got | IsLess(ndays) | If(IsTrue {[" (" got "/" ndays " dates returned a fare)"] | String.Format} {""}))
+     "\n"] | String.Format
   }) | AppendTo(result)
+  raw-days | When(IsMore(@gf-max-days) {
+    ["\n(Range was capped to the first " @gf-max-days " days.)\n"] | String.Format | AppendTo(result)
+  })
 
   result
 } Pure: true)
@@ -145,7 +166,7 @@
 {
   definition: {
     name: "google_flights_cheap_dates"
-    description: "Scan a date range on Google Flights and return the price for each departure date, to find the cheapest dates to fly. Supports one-way or fixed-duration round trips. Max 61 days per call."
+    description: "Find the cheapest dates to fly between two airports over a date range, by running one real Google Flights search per date and reporting each date's cheapest fare. Supports one-way or fixed-duration round trips. Uses the public Google Flights website (no API key). Scans up to 45 days per call."
     parameters: {
       type: "object"
       properties: {
@@ -163,11 +184,11 @@
         }
         to-date: {
           type: "string"
-          description: "End of the date range to scan, YYYY-MM-DD. At most 61 days after from-date."
+          description: "End of the date range to scan, YYYY-MM-DD. At most 45 days after from-date."
         }
         duration: {
           type: "integer"
-          description: "Optional trip length in days. When set, prices are round-trip totals for a trip of exactly this many days; when omitted, prices are one-way."
+          description: "Optional trip length in days. When set, prices are round-trip totals for a trip of exactly this many days (return = departure + duration); when omitted, prices are one-way."
         }
         adults: {
           type: "integer"

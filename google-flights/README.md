@@ -1,58 +1,69 @@
 # Google Flights Tools
 
-Tools for searching flights and fare calendars directly against Google Flights'
-internal `FlightsFrontendService` RPC endpoints (the same wire format
-reverse-engineered by the [fli](https://github.com/punitarani/fli) and
-[fast-flights](https://github.com/AWeirdDev/flights) projects). No API key or
-authentication required.
+Tools for searching flights and fare calendars on Google Flights. They drive the
+**public Google Flights website** (not the internal JSON RPC), because that RPC
+(`batchexecute` / `FlightsFrontendService`) is blocked for cookieless callers from
+most IPs — TLS impersonation and session warmup don't reliably get around it. No API
+key or authentication is required.
+
+The approach mirrors the reference projects
+[fli](https://github.com/punitarani/fli) (RPC wire format) and
+[fast-flights](https://github.com/AWeirdDev/fast-flights) (HTML route):
+
+1. Build the deterministic **`tfs` protobuf itinerary token** (airports, dates, trip
+   type, cabin, passengers) — the Shards encoder produces a byte-identical token to
+   fast-flights.
+2. GET `https://www.google.com/travel/flights/search?tfs=…`.
+3. Parse the flight data Google embeds server-side in the page's `ds:1`
+   `AF_initDataCallback` script block (`payload[3][0]`).
+
+Using the `tfs` token (rather than a natural-language `?q=` search) matters: the `q`
+route silently returns a smaller, pricier subset that omits the cheap LCC fares.
 
 ## Tools
 
 ### `google_flights_search` (search-flights.shs)
 
-Search one-way or round-trip flights between two airports on given dates via
-the `GetShoppingResults` endpoint.
+One-way or round-trip search between two airports on given dates. One HTTP request
+(with a small retry on a degraded page), so it's fast and reliable.
 
 - Inputs: `from`, `to` (IATA codes), `date`, optional `return-date`, `adults`,
-  `seat` (economy / premium-economy / business / first), `max-stops` (0/1/2),
-  `sort` (best / top / cheapest / departure-time / arrival-time / duration)
-  and `currency` (ISO 4217, default USD).
+  `children`, `seat` (economy / premium-economy / business / first), `max-stops`
+  (0 = nonstop, 1, 2 — applied client-side), `sort` (best / cheapest / duration),
+  `currency` (ISO 4217, default USD).
 - Output: up to 12 itineraries with price, total duration, stops, per-leg
-  airline / flight number / airports / times / aircraft, layover details, and
-  a Google Flights link for booking.
-- Round trips are priced as full-trip totals; the listed options are the
-  outbound legs (the return leg is picked on Google Flights when booking).
-- If Google rate-limits the RPC endpoint (it returns a null `wrb.fr` payload
-  with a `[13]` marker after sustained cookieless traffic), the tool
-  automatically falls back to fetching the website's HTML search page
-  (`/travel/flights?q=...`) and extracting the identical payload from its
-  `AF_initDataCallback` `ds:1` script block. The fallback carries route,
-  dates, cabin and nonstop preferences in the natural-language query, but
-  passenger count and sort order may be ignored; output is tagged when the
-  fallback was used.
+  airline / flight number / airports / times / aircraft, layover details, and a
+  deterministic Google Flights link that opens the exact itinerary.
+- Round trips are priced as full-trip totals; the listed options are the outbound
+  legs (pick the return leg via the link when booking).
+- One request per call — fast and reliable.
 
 ### `google_flights_cheap_dates` (cheap-dates.shs)
 
-Scan a date range and return the lowest fare for each departure date via the
-`GetCalendarGraph` endpoint — useful for finding the cheapest dates to fly.
+Cheapest fare per departure date across a range — for finding the cheapest dates to
+fly. There is no HTML page that embeds the whole price calendar (the website loads
+that grid via the same blocked RPC), so this tool reconstructs it honestly by running
+**one real flight search per date** and taking each date's cheapest bookable fare.
 
-- Inputs: `from`, `to`, `from-date`, `to-date` (max 61 days per call),
-  optional `duration` (trip length in days — when set, prices become
-  round-trip totals for trips of exactly that length), `adults`, `seat`,
-  `currency`.
-- Output: one price per date (departure ~ return pairs for round trips) plus
-  the cheapest date found.
-- No HTML fallback exists for the calendar endpoint; while rate-limited it
-  fails with a clear "retry later" message.
+- Inputs: `from`, `to`, `from-date`, `to-date`, optional `duration` (trip length in
+  days — when set, prices are round-trip totals for a trip of exactly that length),
+  `adults`, `seat`, `currency`.
+- Output: one price per date (departure ~ return pairs for round trips), the cheapest
+  date found, and a note if some dates couldn't be fetched.
+- One request per date, issued **sequentially** — ~0.5s/date, so a two-week scan is
+  ~8s and the 45-day cap is ~25s. Range capped at `gf-max-days` (45); scan wider spans
+  in chunks.
 
-## How It Works
+**Why sequential matters (do not parallelise this).** Fetching the dates concurrently
+(e.g. with `TryMany`) makes Shards' reqwest client multiplex the requests over a single
+HTTP/2 connection, and Google responds to *that* pattern with degraded pages that carry
+no flight rows — which looks exactly like rate-limiting but isn't. Issued one at a time,
+the requests are not throttled at all (verified 15/15 dates in ~8s, matching what curl
+and fast-flights get looping sequentially). If you ever need more throughput, use
+separate connections / separate processes, not concurrent requests on one client.
 
-Both tools build the nested-array `f.req` payload Google's own web UI sends
-(URL-encoded JSON wrapped in JSON), POST it as a form body, then parse the
-`)]}'`-prefixed `wrb.fr` chunked response. Prices are requested in the
-currency given via the `curr` URL parameter.
+## Notes
 
-The response layout is positional and undocumented, so parsing is defensive:
-malformed rows are skipped instead of failing the whole call. If Google
-changes the wire format, see the fli project's `.reverse-eng` notes for
-re-mapping the indices.
+The response layout is positional and undocumented, so parsing is defensive: malformed
+rows are skipped rather than failing the whole call. If Google changes the wire format,
+re-map indices against fast-flights' `parser.py` and fli's `.reverse-eng` notes.
